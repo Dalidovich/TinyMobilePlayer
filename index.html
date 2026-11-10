@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#11140f">
+<meta name="color-scheme" content="dark">
+<title>Tiny Player</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/app.css">
+<script type="module" src="js/app.js"></script>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></symbol>
+  <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></symbol>
+  <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></symbol>
+  <symbol id="i-repeat-one" viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4zm-4-2V9h-1l-2 1v1h1.5v4H13z"/></symbol>
+  <symbol id="i-queue" viewBox="0 0 24 24"><path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M16.59 8.59L12 13.17 7.41 8.59 6 10l6 6 6-6z"/></symbol>
+  <symbol id="i-to-top" viewBox="0 0 24 24"><path d="M8 11h3v10h2V11h3l-4-4-4 4zM4 3v2h16V3H4z"/></symbol>
+  <symbol id="i-handle" viewBox="0 0 24 24"><path d="M20 9H4v2h16V9zM4 15h16v-2H4v2z"/></symbol>
+  <symbol id="i-play-next" viewBox="0 0 24 24"><path d="M19 9H2v2h17V9zm0-4H2v2h17V5zM2 15h13v-2H2v2zm15-2v6l5-3-5-3z"/></symbol>
+  <symbol id="i-queue-add" viewBox="0 0 24 24"><path d="M14 10H2v2h12v-2zm0-4H2v2h12V6zm4 8v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zM2 16h8v-2H2v2z"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></symbol>
+  <symbol id="i-add" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.49.49 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.48.48 0 00-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></symbol>
+</svg>
+
+<header class="top">
+  <input id="search" type="search" autocomplete="off" data-i18n-placeholder="search">
+  <button id="menu-btn" class="icon" data-i18n-label="menu"><svg><use href="#i-more"/></svg></button>
+</header>
+
+<div id="list-bar" class="list-bar" hidden>
+  <span id="count"></span>
+  <button id="shuffle-all" class="chip"><svg><use href="#i-shuffle"/></svg><span data-i18n="shuffleAll"></span></button>
+  <button id="play-all" class="chip"><svg><use href="#i-play"/></svg><span data-i18n="playAll"></span></button>
+</div>
+
+<div id="import-progress" class="import" hidden>
+  <span id="import-text"></span>
+  <div class="bar"><div id="import-bar"></div></div>
+</div>
+
+<main id="library" class="library"></main>
+
+<div id="empty" class="empty" hidden>
+  <svg class="empty-icon"><use href="#i-queue"/></svg>
+  <h2 data-i18n="empty.title"></h2>
+  <p id="empty-hint"></p>
+  <button class="primary" data-action="pick-folder"><svg><use href="#i-folder"/></svg><span id="pick-folder-label"></span></button>
+  <button class="secondary" data-action="add-files"><svg><use href="#i-add"/></svg><span data-i18n="addFiles"></span></button>
+</div>
+<p id="no-results" class="no-results" data-i18n="noResults" hidden></p>
+
+<footer id="mini" class="mini" hidden>
+  <div class="mini-progress"><div id="mini-bar"></div></div>
+  <div id="mini-cover" class="cover"></div>
+  <div class="mini-meta">
+    <div id="mini-title" class="title"></div>
+    <div id="mini-artist" class="sub"></div>
+  </div>
+  <button id="mini-play" class="icon" data-i18n-label="label.play"><svg><use href="#i-play"/></svg></button>
+  <button id="mini-next" class="icon" data-i18n-label="label.next"><svg><use href="#i-next"/></svg></button>
+</footer>
+
+<section id="now" class="sheet" aria-modal="true" role="dialog">
+  <div class="sheet-head">
+    <button class="icon" data-action="close-sheet" data-i18n-label="label.close"><svg><use href="#i-down"/></svg></button>
+    <span data-i18n="nowPlaying"></span>
+    <button class="icon" data-action="open-queue" data-i18n-label="label.queue"><svg><use href="#i-queue"/></svg></button>
+  </div>
+  <div class="now-body">
+    <div id="now-swipe" class="now-swipe">
+      <div id="now-cover" class="cover art"></div>
+      <div class="now-meta">
+        <div id="now-title" class="title"></div>
+        <div id="now-artist" class="sub"></div>
+      </div>
+    </div>
+    <input id="seek" type="range" min="0" max="1000" step="1" value="0" data-i18n-label="label.seek">
+    <div class="times"><span id="time-current">0:00</span><span id="time-total">0:00</span></div>
+    <div class="controls">
+      <button id="shuffle" class="icon toggle" data-i18n-label="label.shuffle"><svg><use href="#i-shuffle"/></svg></button>
+      <button id="prev" class="icon big" data-i18n-label="label.prev"><svg><use href="#i-prev"/></svg></button>
+      <button id="play" class="icon play" data-i18n-label="label.play"><svg><use href="#i-play"/></svg></button>
+      <button id="next" class="icon big" data-i18n-label="label.next"><svg><use href="#i-next"/></svg></button>
+      <button id="repeat" class="icon toggle" data-i18n-label="label.repeat"><svg><use href="#i-repeat"/></svg></button>
+    </div>
+  </div>
+</section>
+
+<section id="queue" class="sheet" aria-modal="true" role="dialog">
+  <div class="sheet-head">
+    <button class="icon" data-action="close-sheet" data-i18n-label="label.close"><svg><use href="#i-down"/></svg></button>
+    <span data-i18n="queue.title"></span>
+    <span class="icon-spacer"></span>
+  </div>
+  <div id="queue-body" class="queue-body">
+    <h3 data-i18n="queue.now"></h3>
+    <div id="queue-current" class="qitem current"></div>
+    <div id="queue-next-section">
+      <div class="qhead">
+        <h3 data-i18n="queue.next"></h3>
+        <button id="queue-clear" class="text-btn" data-i18n="queue.clear"></button>
+      </div>
+      <ul id="queue-next" class="qlist"></ul>
+    </div>
+    <div id="queue-later-section">
+      <h3 data-i18n="queue.later"></h3>
+      <ul id="queue-later" class="qlist"></ul>
+      <p id="queue-more" class="muted"></p>
+    </div>
+    <p id="queue-empty" class="muted" data-i18n="queue.empty" hidden></p>
+  </div>
+</section>
+
+<dialog id="track-actions" class="action-sheet">
+  <div class="action-title">
+    <div id="action-cover" class="cover"></div>
+    <div>
+      <div id="action-name" class="title"></div>
+      <div id="action-artist" class="sub"></div>
+    </div>
+  </div>
+  <button data-action="play-next"><svg><use href="#i-play-next"/></svg><span data-i18n="actions.playNext"></span></button>
+  <button data-action="add-to-queue"><svg><use href="#i-queue-add"/></svg><span data-i18n="actions.addToQueue"></span></button>
+  <button data-action="close-dialog" class="cancel" data-i18n="cancel"></button>
+</dialog>
+
+<dialog id="menu" class="action-sheet">
+  <button data-action="pick-folder"><svg><use href="#i-folder"/></svg><span data-i18n="pickFolder"></span></button>
+  <button data-action="add-files"><svg><use href="#i-add"/></svg><span data-i18n="addFiles"></span></button>
+  <button data-action="open-settings"><svg><use href="#i-settings"/></svg><span data-i18n="settings.title"></span></button>
+  <button data-action="close-dialog" class="cancel" data-i18n="cancel"></button>
+</dialog>
+
+<dialog id="settings" class="action-sheet">
+  <h2 class="sheet-title" data-i18n="settings.title"></h2>
+  <h3 class="sheet-section" id="language-heading" data-i18n="settings.language"></h3>
+  <div id="language-options" role="radiogroup" aria-labelledby="language-heading"></div>
+  <button data-action="close-dialog" class="cancel" data-i18n="label.close"></button>
+</dialog>
+
+<div id="toast" class="toast" role="status" hidden></div>
+
+<input id="folder-input" type="file" webkitdirectory multiple hidden>
+<input id="files-input" type="file" multiple accept="audio/*,.mp3,.m4a,.m4b,.aac,.flac,.ogg,.oga,.opus,.wav,.webm" hidden>
+</body>
+</html>
