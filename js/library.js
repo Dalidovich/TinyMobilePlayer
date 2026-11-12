@@ -101,6 +101,18 @@ export class Library extends EventTarget {
     return this.tracks.some(track => !this.files.has(track.id));
   }
 
+  attachFiles(files) {
+    for (const [id, file] of files) {
+      if (this.byId.has(id) && !this.files.has(id)) this.files.set(id, file);
+    }
+  }
+
+  detachFiles(files) {
+    for (const [id, file] of files) {
+      if (this.files.get(id) === file) this.files.delete(id);
+    }
+  }
+
   restore({ tracks, covers }) {
     this.reset();
     for (const [key, blobs] of covers) this.covers.set(key, coverEntry(blobs));

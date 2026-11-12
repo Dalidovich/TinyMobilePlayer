@@ -130,6 +130,14 @@ export class Player extends EventTarget {
     this.play();
   }
 
+  stopIfMissing() {
+    const track = this.track;
+    if (!track || this.library.getFile(track)) return;
+    this.stop();
+    this.emit('track');
+    this.emit('queue');
+  }
+
   resumeAfterLink() {
     const track = this.track;
     if (track && !this.objectUrl && this.library.getFile(track)) this.load(track.id);

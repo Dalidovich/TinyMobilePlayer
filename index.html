@@ -52,6 +52,11 @@
   <div class="bar"><div id="import-bar"></div></div>
 </div>
 
+<div id="store-progress" class="import" hidden>
+  <span id="store-text"></span>
+  <div class="bar"><div id="store-bar"></div></div>
+</div>
+
 <main id="library" class="library"></main>
 
 <div id="empty" class="empty" hidden>
@@ -149,6 +154,13 @@
   <h2 class="sheet-title" data-i18n="settings.title"></h2>
   <h3 class="sheet-section" id="language-heading" data-i18n="settings.language"></h3>
   <div id="language-options" role="radiogroup" aria-labelledby="language-heading"></div>
+  <div id="offline-section" hidden>
+    <h3 class="sheet-section" data-i18n="settings.storage"></h3>
+    <button id="offline-toggle" class="switch-row" role="switch" aria-checked="false">
+      <span class="switch-text"><span data-i18n="offline.title"></span><small id="offline-status"></small></span>
+      <span class="switch" aria-hidden="true"></span>
+    </button>
+  </div>
   <button data-action="close-dialog" class="cancel" data-i18n="label.close"></button>
 </dialog>
 

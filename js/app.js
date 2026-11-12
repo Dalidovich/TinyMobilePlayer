@@ -1,6 +1,7 @@
 import { AUTO, SUPPORTED, initI18n, languageName, languageSetting, setLanguage, t } from './i18n.js';
 import { Library, folderNameOf } from './library.js';
 import { loadLibrary, saveLibrary } from './library-cache.js';
+import { clearStoredFiles, freeSpace, loadStoredFiles, offlineSupported, removeStoredFiles, storeFiles } from './offline-store.js';
 import { Player } from './player.js';
 import { VirtualList } from './virtual-list.js';
 import { sortable } from './sortable.js';
@@ -10,6 +11,9 @@ const ROW_HEIGHT = 64;
 const UPCOMING_LIMIT = 100;
 const TOAST_MS = 2500;
 const FOLDER_KEY = 'tiny-player.folder';
+const OFFLINE_KEY = 'tiny-player.offline';
+const GIGABYTE = 1024 ** 3;
+const MEGABYTE = 1024 ** 2;
 
 const $ = id => document.getElementById(id);
 
@@ -20,6 +24,10 @@ let visible = [];
 let actionTrack = null;
 let seeking = false;
 let toastTimer = 0;
+let stored = new Map();
+let storingTask = null;
+let stopStoring = false;
+let storeAgain = false;
 
 function pad(n) {
   return String(n).padStart(2, '0');
@@ -230,6 +238,125 @@ async function restoreCache() {
   }
 }
 
+const offlineEnabled = () => offlineSupported && localStorage.getItem(OFFLINE_KEY) === '1';
+
+function formatSize(bytes) {
+  const [value, unit] = bytes >= GIGABYTE ? [bytes / GIGABYTE, 'gigabyte'] : [bytes / MEGABYTE, 'megabyte'];
+  const format = new Intl.NumberFormat(document.documentElement.lang, { style: 'unit', unit, maximumFractionDigits: 1 });
+  return format.format(value);
+}
+
+function renderOfflineSetting() {
+  $('offline-section').hidden = !offlineSupported;
+  const enabled = offlineEnabled();
+  $('offline-toggle').setAttribute('aria-checked', String(enabled));
+  let bytes = 0;
+  for (const file of stored.values()) bytes += file.size;
+  $('offline-status').textContent = enabled
+    ? t('offline.status', { tracks: t('tracks', { count: stored.size }), size: formatSize(bytes) })
+    : t('offline.hint');
+}
+
+async function restoreStoredFiles() {
+  if (!offlineEnabled()) return;
+  try {
+    stored = await loadStoredFiles();
+    library.attachFiles(stored);
+  } catch {
+    stored = new Map();
+  }
+}
+
+function storeLibrary() {
+  if (!offlineEnabled()) return;
+  if (storingTask) {
+    storeAgain = true;
+    return;
+  }
+  stopStoring = false;
+  storingTask = copyToStorage().finally(() => {
+    storingTask = null;
+    $('store-progress').hidden = true;
+    renderOfflineSetting();
+    if (storeAgain && !stopStoring) {
+      storeAgain = false;
+      storeLibrary();
+    }
+  });
+}
+
+async function copyToStorage() {
+  try {
+    const orphans = [...stored.keys()].filter(id => !library.byId.has(id));
+    await removeStoredFiles(orphans);
+    for (const id of orphans) stored.delete(id);
+    const pending = library.tracks
+      .filter(track => !stored.has(track.id) && library.getFile(track))
+      .map(track => [track.id, library.getFile(track)]);
+    if (!pending.length) return;
+    const bytes = pending.reduce((sum, [, file]) => sum + file.size, 0);
+    if (bytes > await freeSpace()) {
+      toast(t('offline.noSpace', { size: formatSize(bytes) }));
+      return;
+    }
+    await navigator.storage.persist?.();
+    const progress = (done, total) => {
+      $('store-text').textContent = t('offline.progress', { done, total });
+      $('store-bar').style.transform = `scaleX(${total ? done / total : 0})`;
+    };
+    $('store-progress').hidden = false;
+    progress(0, pending.length);
+    const wakeLock = await navigator.wakeLock?.request('screen').catch(() => null);
+    try {
+      await storeFiles(pending, {
+        shouldStop: () => stopStoring,
+        onProgress: (done, total) => {
+          const [id, file] = pending[done - 1];
+          stored.set(id, file);
+          progress(done, total);
+        },
+      });
+    } finally {
+      wakeLock?.release().catch(() => {});
+    }
+    if (!stopStoring) toast(t('offline.done', { tracks: t('tracks', { count: stored.size }) }));
+  } catch (error) {
+    toast(t('offline.error', { message: error.message }));
+  }
+}
+
+async function disableOffline() {
+  if (!confirm(t('offline.confirmDisable'))) return;
+  localStorage.removeItem(OFFLINE_KEY);
+  stopStoring = true;
+  storeAgain = false;
+  await storingTask;
+  library.detachFiles(stored);
+  stored = new Map();
+  await clearStoredFiles();
+  player.stopIfMissing();
+  toast(t('offline.cleared'));
+}
+
+function enableOffline() {
+  localStorage.setItem(OFFLINE_KEY, '1');
+  if (library.tracks.length && library.needsFiles) {
+    toast(t('offline.pickFolder'));
+    closeDialogs();
+    $('folder-input').click();
+  } else {
+    storeLibrary();
+  }
+}
+
+async function toggleOffline() {
+  if (offlineEnabled()) await disableOffline();
+  else enableOffline();
+  renderOfflineSetting();
+  renderFolderHint();
+  trackList.refresh();
+}
+
 function renderLanguageOptions() {
   const current = languageSetting();
   $('language-options').replaceChildren(...[AUTO, ...SUPPORTED].map(lang => {
@@ -250,6 +377,7 @@ function renderTexts() {
   if (actionTrack) $('action-artist').textContent = subtitle(actionTrack);
   renderFolderHint();
   renderLanguageOptions();
+  renderOfflineSetting();
   applyFilter();
   renderTrack();
   renderQueue();
@@ -290,6 +418,7 @@ async function importFiles(input, replace) {
     renderFolderHint();
     trackList.refresh();
     saveCache();
+    storeLibrary();
   }
 }
 
@@ -305,6 +434,7 @@ const actions = {
   'open-settings': () => {
     closeDialogs();
     renderLanguageOptions();
+    renderOfflineSetting();
     $('settings').showModal();
   },
   'close-dialog': button => button.closest('dialog').close(),
@@ -405,6 +535,7 @@ $('language-options').addEventListener('click', async event => {
 });
 
 $('queue-clear').addEventListener('click', () => player.clearUpNext());
+$('offline-toggle').addEventListener('click', toggleOffline);
 
 $('queue-body').addEventListener('click', event => {
   const item = event.target.closest('.qlist > li');
@@ -451,6 +582,8 @@ async function init() {
   await initI18n();
   trackList = createTrackList();
   await restoreCache();
+  await restoreStoredFiles();
+  renderOfflineSetting();
   renderFolderHint();
   player.restoreSettings();
   applyFilter();

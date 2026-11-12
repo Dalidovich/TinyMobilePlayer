@@ -50,5 +50,16 @@
   "settings.languageAuto": "System language",
   "relink.folder": "Open folder «{name}» to play music",
   "relink.generic": "Choose the music folder to play music",
-  "relink.toast": "Choose the music folder again to play"
+  "relink.toast": "Choose the music folder again to play",
+  "settings.storage": "Storage",
+  "offline.title": "Keep music in the browser",
+  "offline.hint": "Copies music into browser storage so it plays without choosing the folder after a restart. Takes extra space.",
+  "offline.status": "Stored {tracks} · {size}",
+  "offline.progress": "Saving to browser {done} / {total}",
+  "offline.done": "Stored in browser: {tracks}",
+  "offline.noSpace": "Not enough browser storage: {size} needed",
+  "offline.error": "Saving failed: {message}",
+  "offline.pickFolder": "Choose the music folder to copy it",
+  "offline.confirmDisable": "Delete the music copy from browser storage? The original files will not be touched.",
+  "offline.cleared": "Music copy deleted"
 }
