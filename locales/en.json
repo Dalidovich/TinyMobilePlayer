@@ -47,5 +47,8 @@
   "label.toTop": "Move to top",
   "settings.title": "Settings",
   "settings.language": "Language",
-  "settings.languageAuto": "System language"
+  "settings.languageAuto": "System language",
+  "relink.folder": "Open folder «{name}» to play music",
+  "relink.generic": "Choose the music folder to play music",
+  "relink.toast": "Choose the music folder again to play"
 }

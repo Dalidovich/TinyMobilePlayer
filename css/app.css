@@ -154,6 +154,28 @@ svg {
   height: 18px;
 }
 
+.relink {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 12px 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--accent);
+  font-size: 13px;
+  text-align: left;
+}
+
+.relink svg {
+  width: 20px;
+  height: 20px;
+}
+
+.row.missing .meta {
+  opacity: 0.6;
+}
+
 .import {
   padding: 4px 12px 8px;
   font-size: 13px;

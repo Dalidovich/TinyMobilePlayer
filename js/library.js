@@ -45,10 +45,34 @@ async function makeCover(source) {
     const bitmap = await createImageBitmap(source);
     const [full, thumb] = await Promise.all([resizeImage(bitmap, COVER_SIZE), resizeImage(bitmap, THUMB_SIZE)]);
     bitmap.close();
-    return { full: URL.createObjectURL(full), thumb: URL.createObjectURL(thumb) };
+    return { full, thumb };
   } catch {
     return null;
   }
+}
+
+function coverEntry(blobs) {
+  const urls = blobs && { full: URL.createObjectURL(blobs.full), thumb: URL.createObjectURL(blobs.thumb) };
+  return { blobs, urls, promise: Promise.resolve(urls) };
+}
+
+function pendingCoverEntry(source) {
+  const entry = { blobs: null, urls: undefined };
+  entry.promise = makeCover(source).then(blobs => {
+    const ready = coverEntry(blobs);
+    entry.blobs = ready.blobs;
+    entry.urls = ready.urls;
+    return ready.urls;
+  });
+  return entry;
+}
+
+function revokeCover(entry) {
+  entry.promise.then(urls => {
+    if (!urls) return;
+    URL.revokeObjectURL(urls.full);
+    URL.revokeObjectURL(urls.thumb);
+  });
 }
 
 export function folderNameOf(files) {
@@ -73,19 +97,41 @@ export class Library extends EventTarget {
     return this.files.get(track.id);
   }
 
+  get needsFiles() {
+    return this.tracks.some(track => !this.files.has(track.id));
+  }
+
+  restore({ tracks, covers }) {
+    this.reset();
+    for (const [key, blobs] of covers) this.covers.set(key, coverEntry(blobs));
+    this.setTracks(tracks);
+  }
+
+  async snapshot() {
+    const entries = [...this.covers];
+    await Promise.all(entries.map(([, entry]) => entry.promise));
+    const used = new Set(this.tracks.map(track => track.cover));
+    const covers = entries.filter(([key, entry]) => entry.blobs && used.has(key));
+    return { tracks: this.tracks, covers: new Map(covers.map(([key, entry]) => [key, entry.blobs])) };
+  }
+
   async link(fileList, { replace = false, onProgress } = {}) {
     const files = [...fileList];
     const audioFiles = files.filter(file => AUDIO_FILE.test(file.name));
     if (!audioFiles.length) return 0;
-    if (replace) this.reset();
+    const previous = this.tracks;
+    const known = this.byId;
+    if (replace) this.files.clear();
     const folderCovers = new Map();
     for (const file of files) {
       const folder = folderOf(pathOf(file));
       if (FOLDER_COVER.test(file.name) && !folderCovers.has(folder)) folderCovers.set(folder, file);
     }
-    const tracks = [...this.tracks];
+    const tracks = replace ? [] : [...previous];
+    const listed = new Set(tracks.map(track => track.id));
     let next = 0;
     let done = 0;
+    let described = 0;
     const readNext = async () => {
       while (next < audioFiles.length) {
         const file = audioFiles[next++];
@@ -93,15 +139,31 @@ export class Library extends EventTarget {
         const id = hash(path + '\u0000' + file.size);
         if (!this.files.has(id)) {
           this.files.set(id, file);
-          tracks.push(await this.describe(file, path, id, folderCovers));
+          if (!listed.has(id)) {
+            listed.add(id);
+            const cached = known.get(id);
+            tracks.push(cached ?? await this.describe(file, path, id, folderCovers));
+            if (!cached && ++described % PUBLISH_EVERY === 0) {
+              this.setTracks([...tracks, ...previous.filter(track => !listed.has(track.id))]);
+            }
+          }
         }
         onProgress?.(++done, audioFiles.length);
-        if (done % PUBLISH_EVERY === 0) this.setTracks([...tracks]);
       }
     };
     await Promise.all(Array.from({ length: PARALLEL_READS }, readNext));
     this.setTracks(tracks);
+    if (replace) this.pruneCovers();
     return audioFiles.length;
+  }
+
+  pruneCovers() {
+    const used = new Set(this.tracks.map(track => track.cover));
+    for (const [key, entry] of this.covers) {
+      if (used.has(key)) continue;
+      revokeCover(entry);
+      this.covers.delete(key);
+    }
   }
 
   async describe(file, path, id, folderCovers) {
@@ -109,11 +171,7 @@ export class Library extends EventTarget {
     const folder = folderOf(path);
     const cover = hash((tags.artist ?? '') + '\u0000' + (tags.album ?? folder));
     const source = tags.picture ?? folderCovers.get(folder);
-    if (source && !this.covers.has(cover)) {
-      const entry = { urls: undefined };
-      entry.promise = makeCover(source).then(urls => (entry.urls = urls));
-      this.covers.set(cover, entry);
-    }
+    if (source && !this.covers.has(cover)) this.covers.set(cover, pendingCoverEntry(source));
     return {
       id,
       path,
@@ -128,13 +186,7 @@ export class Library extends EventTarget {
 
   reset() {
     this.files.clear();
-    for (const { promise } of this.covers.values()) {
-      promise.then(urls => {
-        if (!urls) return;
-        URL.revokeObjectURL(urls.full);
-        URL.revokeObjectURL(urls.thumb);
-      });
-    }
+    for (const entry of this.covers.values()) revokeCover(entry);
     this.covers.clear();
     this.tracks = [];
     this.byId = new Map();

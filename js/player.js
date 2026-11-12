@@ -120,9 +120,19 @@ export class Player extends EventTarget {
     this.emit('queue');
     this.updateMediaSession(track);
     this.releaseSource();
-    this.objectUrl = URL.createObjectURL(this.library.getFile(track));
+    const file = this.library.getFile(track);
+    if (!file) {
+      this.emit('missingfile');
+      return;
+    }
+    this.objectUrl = URL.createObjectURL(file);
     this.audio.src = this.objectUrl;
     this.play();
+  }
+
+  resumeAfterLink() {
+    const track = this.track;
+    if (track && !this.objectUrl && this.library.getFile(track)) this.load(track.id);
   }
 
   play() {
@@ -133,6 +143,10 @@ export class Player extends EventTarget {
     if (!this.current) {
       const ids = this.library.tracks.map(track => track.id);
       if (ids.length) this.playList(ids, this.shuffle ? ids[Math.floor(Math.random() * ids.length)] : ids[0]);
+      return;
+    }
+    if (!this.objectUrl) {
+      this.load(this.current);
       return;
     }
     this.audio.play().catch(() => {});

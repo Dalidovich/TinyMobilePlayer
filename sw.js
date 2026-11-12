@@ -1,4 +1,4 @@
-const CACHE = 'tiny-player-v6';
+const CACHE = 'tiny-player-v7';
 const ASSETS = [
   './',
   'index.html',
@@ -10,6 +10,7 @@ const ASSETS = [
   'js/app.js',
   'js/i18n.js',
   'js/library.js',
+  'js/library-cache.js',
   'js/player.js',
   'js/sortable.js',
   'js/swipe.js',

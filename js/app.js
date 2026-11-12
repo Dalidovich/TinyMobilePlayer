@@ -1,5 +1,6 @@
 import { AUTO, SUPPORTED, initI18n, languageName, languageSetting, setLanguage, t } from './i18n.js';
 import { Library, folderNameOf } from './library.js';
+import { loadLibrary, saveLibrary } from './library-cache.js';
 import { Player } from './player.js';
 import { VirtualList } from './virtual-list.js';
 import { sortable } from './sortable.js';
@@ -81,6 +82,7 @@ function createTrackList() {
       meta.firstChild.textContent = track.title;
       meta.lastChild.textContent = subtitle(track);
       row.classList.toggle('active', track.id === player.current);
+      row.classList.toggle('missing', !library.getFile(track));
     },
   });
 }
@@ -206,6 +208,26 @@ function renderFolderHint() {
   const folder = localStorage.getItem(FOLDER_KEY);
   $('pick-folder-label').textContent = folder ? t('openFolder', { name: folder }) : t('pickFolder');
   $('empty-hint').textContent = folder ? t('empty.reopenHint') : t('empty.hint');
+  $('relink-label').textContent = folder ? t('relink.folder', { name: folder }) : t('relink.generic');
+  $('relink').hidden = !library.needsFiles;
+}
+
+async function saveCache() {
+  try {
+    await saveLibrary(await library.snapshot());
+    await navigator.storage?.persist?.();
+  } catch {
+    return;
+  }
+}
+
+async function restoreCache() {
+  try {
+    const cached = await loadLibrary();
+    if (cached) library.restore(cached);
+  } catch {
+    return;
+  }
 }
 
 function renderLanguageOptions() {
@@ -264,6 +286,10 @@ async function importFiles(input, replace) {
     $('import-progress').hidden = true;
     wakeLock?.release().catch(() => {});
     player.syncWithLibrary();
+    player.resumeAfterLink();
+    renderFolderHint();
+    trackList.refresh();
+    saveCache();
   }
 }
 
@@ -416,10 +442,15 @@ player.addEventListener('queue', () => {
   renderQueue();
 });
 player.addEventListener('error', () => toast(t('playError')));
+player.addEventListener('missingfile', () => {
+  toast(t('relink.toast'));
+  $('folder-input').click();
+});
 
 async function init() {
   await initI18n();
   trackList = createTrackList();
+  await restoreCache();
   renderFolderHint();
   player.restoreSettings();
   applyFilter();

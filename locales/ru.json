@@ -49,5 +49,8 @@
   "label.toTop": "Наверх",
   "settings.title": "Настройки",
   "settings.language": "Язык",
-  "settings.languageAuto": "Как в системе"
+  "settings.languageAuto": "Как в системе",
+  "relink.folder": "Откройте папку «{name}», чтобы слушать музыку",
+  "relink.generic": "Выберите папку с музыкой, чтобы слушать музыку",
+  "relink.toast": "Выберите папку с музыкой ещё раз, чтобы слушать"
 }

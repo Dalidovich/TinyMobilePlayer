@@ -44,7 +44,7 @@ After changing any cached file, bump the `CACHE` version in [sw.js](sw.js) so cl
 ## Limitations
 
 - Browsers do not keep access to a picked folder between launches, so the folder has to be chosen again after the app restarts. The last folder name is remembered and shown as a hint.
-- The library lives in memory only; nothing about your files is persisted besides the folder name and playback settings.
+- The library index (track list, tags and cover thumbnails) is cached in IndexedDB, so it shows up instantly on the next launch. Playing still requires choosing the folder again; already known files are matched by path and size and are not re-read, so this takes seconds instead of a full rescan.
 
 ## Project structure
 
@@ -55,6 +55,7 @@ sw.js                   Service worker (offline cache)
 css/app.css             Styles
 js/app.js               UI wiring and app entry point
 js/library.js           File import, track list, cover art
+js/library-cache.js     IndexedDB cache of the library index and covers
 js/player.js            Playback, queue, shuffle/repeat, Media Session
 js/tags.js              Tag parsers: ID3, FLAC, Ogg, MP4
 js/virtual-list.js      Virtualized scrolling list
