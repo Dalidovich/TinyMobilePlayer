@@ -18,6 +18,12 @@ export async function loadStoredFiles() {
   return files;
 }
 
+export async function readStoredFile(id) {
+  const dir = await musicDir();
+  const handle = await dir.getFileHandle(id);
+  return handle.getFile();
+}
+
 export async function storeFiles(entries, { onProgress, shouldStop } = {}) {
   const dir = await musicDir();
   let done = 0;

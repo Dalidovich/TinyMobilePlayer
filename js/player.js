@@ -1,3 +1,5 @@
+import { logEvent } from './diagnostics.js';
+
 const SETTINGS_KEY = 'tiny-player.settings';
 const RESTART_THRESHOLD = 3;
 const MAX_FAILURES = 5;
@@ -28,6 +30,7 @@ export class Player extends EventTarget {
   repeat = 'off';
   failures = 0;
   objectUrl = null;
+  retried = null;
 
   constructor(library) {
     super();
@@ -50,8 +53,16 @@ export class Player extends EventTarget {
     this.dispatchEvent(new Event(type));
   }
 
+  describeState() {
+    const { currentTime, duration, readyState, networkState } = this.audio;
+    return `${this.current ?? '-'} t=${currentTime.toFixed(1)} d=${duration.toFixed(1)} rs=${readyState} ns=${networkState}`;
+  }
+
   bindAudio() {
     const audio = this.audio;
+    for (const type of ['play', 'playing', 'pause', 'ended', 'waiting', 'stalled', 'abort', 'emptied']) {
+      audio.addEventListener(type, () => logEvent(type, this.describeState()));
+    }
     audio.addEventListener('ended', () => this.next(true));
     audio.addEventListener('playing', () => {
       this.failures = 0;
@@ -83,7 +94,10 @@ export class Player extends EventTarget {
     };
     for (const [action, handler] of Object.entries(handlers)) {
       try {
-        session.setActionHandler(action, handler);
+        session.setActionHandler(action, details => {
+          logEvent(`session:${action}`, this.describeState());
+          handler(details);
+        });
       } catch {
         continue;
       }
@@ -119,15 +133,24 @@ export class Player extends EventTarget {
     this.emit('track');
     this.emit('queue');
     this.updateMediaSession(track);
-    this.releaseSource();
+    this.retried = null;
+    logEvent('load', id);
     const file = this.library.getFile(track);
     if (!file) {
+      this.releaseSource();
       this.emit('missingfile');
       return;
     }
+    this.setSource(file);
+    this.play();
+  }
+
+  setSource(file, position = 0) {
+    const previous = this.objectUrl;
     this.objectUrl = URL.createObjectURL(file);
     this.audio.src = this.objectUrl;
-    this.play();
+    if (position) this.audio.currentTime = position;
+    if (previous) URL.revokeObjectURL(previous);
   }
 
   stopIfMissing() {
@@ -157,7 +180,10 @@ export class Player extends EventTarget {
       this.load(this.current);
       return;
     }
-    this.audio.play().catch(() => {});
+    this.audio.play().catch(error => {
+      logEvent('play-rejected', `${error.name}: ${error.message} ${this.describeState()}`);
+      this.emit('playstate');
+    });
   }
 
   releaseSource() {
@@ -179,7 +205,23 @@ export class Player extends EventTarget {
     this.audio.currentTime = Math.max(0, Math.min(seconds, duration));
   }
 
-  handleFailure() {
+  async handleFailure() {
+    const error = this.audio.error;
+    logEvent('error', `code=${error?.code} ${error?.message ?? ''} ${this.describeState()}`);
+    const id = this.current;
+    const track = this.track;
+    if (track && this.retried !== id) {
+      this.retried = id;
+      const position = this.audio.currentTime;
+      const file = await this.library.reloadFile(track);
+      if (this.current !== id) return;
+      if (file) {
+        logEvent('retry', `${id} at ${position.toFixed(1)}`);
+        this.setSource(file, position);
+        this.play();
+        return;
+      }
+    }
     this.failures++;
     this.emit('error');
     if (this.failures < MAX_FAILURES && this.hasNext()) this.next(true, true);

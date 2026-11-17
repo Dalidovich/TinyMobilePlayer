@@ -85,6 +85,7 @@ export class Library extends EventTarget {
   byId = new Map();
   files = new Map();
   covers = new Map();
+  fileReloader = null;
 
   setTracks(list) {
     list.sort(compareTracks);
@@ -95,6 +96,12 @@ export class Library extends EventTarget {
 
   getFile(track) {
     return this.files.get(track.id);
+  }
+
+  async reloadFile(track) {
+    const fresh = this.fileReloader ? await this.fileReloader(track.id).catch(() => null) : null;
+    if (fresh) this.files.set(track.id, fresh);
+    return fresh ?? this.getFile(track) ?? null;
   }
 
   get needsFiles() {

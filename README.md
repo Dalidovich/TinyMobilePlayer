@@ -59,6 +59,7 @@ js/library.js           File import, track list, cover art
 js/library-cache.js     IndexedDB cache of the library index and covers
 js/offline-store.js     Optional copy of the music files in browser storage (OPFS)
 js/player.js            Playback, queue, shuffle/repeat, Media Session
+js/diagnostics.js       Playback event log (Settings → Diagnostics)
 js/tags.js              Tag parsers: ID3, FLAC, Ogg, MP4
 js/virtual-list.js      Virtualized scrolling list
 js/sortable.js          Drag-to-reorder for the queue

@@ -1,7 +1,8 @@
 import { AUTO, SUPPORTED, initI18n, languageName, languageSetting, setLanguage, t } from './i18n.js';
 import { Library, folderNameOf } from './library.js';
 import { loadLibrary, saveLibrary } from './library-cache.js';
-import { clearStoredFiles, freeSpace, loadStoredFiles, offlineSupported, removeStoredFiles, storeFiles } from './offline-store.js';
+import { clearStoredFiles, freeSpace, loadStoredFiles, offlineSupported, readStoredFile, removeStoredFiles, storeFiles } from './offline-store.js';
+import { logEvent, logText } from './diagnostics.js';
 import { Player } from './player.js';
 import { VirtualList } from './virtual-list.js';
 import { sortable } from './sortable.js';
@@ -257,6 +258,13 @@ function renderOfflineSetting() {
     : t('offline.hint');
 }
 
+library.fileReloader = async id => {
+  if (!stored.has(id)) return null;
+  const file = await readStoredFile(id);
+  stored.set(id, file);
+  return file;
+};
+
 async function restoreStoredFiles() {
   if (!offlineEnabled()) return;
   try {
@@ -306,6 +314,7 @@ async function copyToStorage() {
     };
     $('store-progress').hidden = false;
     progress(0, pending.length);
+    logEvent('store-start', `${pending.length} files`);
     const wakeLock = await navigator.wakeLock?.request('screen').catch(() => null);
     try {
       await storeFiles(pending, {
@@ -319,8 +328,10 @@ async function copyToStorage() {
     } finally {
       wakeLock?.release().catch(() => {});
     }
+    logEvent('store-end', `${stored.size} stored`);
     if (!stopStoring) toast(t('offline.done', { tracks: t('tracks', { count: stored.size }) }));
   } catch (error) {
+    logEvent('store-error', error.message);
     toast(t('offline.error', { message: error.message }));
   }
 }
@@ -436,6 +447,14 @@ const actions = {
     renderLanguageOptions();
     renderOfflineSetting();
     $('settings').showModal();
+  },
+  'copy-log': async () => {
+    try {
+      await navigator.clipboard.writeText(logText());
+      toast(t('diagnostics.copied'));
+    } catch (error) {
+      toast(t('diagnostics.copyFailed', { message: error.message }));
+    }
   },
   'close-dialog': button => button.closest('dialog').close(),
   'close-sheet': closeSheet,
@@ -578,7 +597,15 @@ player.addEventListener('missingfile', () => {
   $('folder-input').click();
 });
 
+for (const type of ['visibilitychange', 'freeze', 'resume']) {
+  document.addEventListener(type, () => logEvent(type));
+}
+for (const type of ['pagehide', 'pageshow']) {
+  addEventListener(type, event => logEvent(type, event.persisted ? 'persisted' : ''));
+}
+
 async function init() {
+  logEvent('start', `offline=${offlineEnabled()}`);
   await initI18n();
   trackList = createTrackList();
   await restoreCache();

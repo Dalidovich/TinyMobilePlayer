@@ -61,5 +61,9 @@
   "offline.error": "Saving failed: {message}",
   "offline.pickFolder": "Choose the music folder to copy it",
   "offline.confirmDisable": "Delete the music copy from browser storage? The original files will not be touched.",
-  "offline.cleared": "Music copy deleted"
+  "offline.cleared": "Music copy deleted",
+  "diagnostics.title": "Diagnostics",
+  "diagnostics.copy": "Copy playback log",
+  "diagnostics.copied": "Log copied",
+  "diagnostics.copyFailed": "Copy failed: {message}"
 }

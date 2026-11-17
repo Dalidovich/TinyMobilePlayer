@@ -1,4 +1,4 @@
-const CACHE = 'tiny-player-v8';
+const CACHE = 'tiny-player-v9';
 const ASSETS = [
   './',
   'index.html',
@@ -8,6 +8,7 @@ const ASSETS = [
   'icon-512.png',
   'css/app.css',
   'js/app.js',
+  'js/diagnostics.js',
   'js/i18n.js',
   'js/library.js',
   'js/library-cache.js',

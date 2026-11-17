@@ -63,5 +63,9 @@
   "offline.error": "Не удалось сохранить: {message}",
   "offline.pickFolder": "Выберите папку с музыкой, чтобы скопировать её",
   "offline.confirmDisable": "Удалить копию музыки из хранилища браузера? Оригинальные файлы не пострадают.",
-  "offline.cleared": "Копия музыки удалена"
+  "offline.cleared": "Копия музыки удалена",
+  "diagnostics.title": "Диагностика",
+  "diagnostics.copy": "Скопировать журнал воспроизведения",
+  "diagnostics.copied": "Журнал скопирован",
+  "diagnostics.copyFailed": "Не удалось скопировать: {message}"
 }
