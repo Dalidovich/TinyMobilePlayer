@@ -6,6 +6,7 @@ const MAX_FAILURES = 5;
 const EXTERNAL_PAUSE_WINDOW = 3;
 const MAX_EXTERNAL_RESUMES = 4;
 const EXTERNAL_RESUME_DELAY = 250;
+const USER_SESSION_WINDOW = 10000;
 const FALLBACK_ARTWORK = 'icon-512.png';
 const REPEAT_MODES = ['off', 'all', 'one'];
 const LOGGED_EVENTS = ['play', 'playing', 'pause', 'ended', 'waiting', 'stalled', 'abort', 'emptied'];
@@ -54,6 +55,9 @@ export class Player extends EventTarget {
   artwork = null;
   resumeTimer = 0;
   metadataAt = 0;
+  hiddenAt = 0;
+  userSessionAt = 0;
+  stalled = false;
 
   constructor(library) {
     super();
@@ -63,7 +67,18 @@ export class Player extends EventTarget {
     this.bindAudio();
     this.bindMediaSession();
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && this.track) this.updateMediaSession(this.track);
+      if (document.visibilityState === 'visible') {
+        this.hiddenAt = 0;
+        this.userSessionAt = 0;
+        if (this.track) this.updateMediaSession(this.track);
+        if (this.stalled) {
+          this.stalled = false;
+          logEvent('pause-resume-visible', this.describeState());
+          this.play();
+        }
+        return;
+      }
+      this.hiddenAt = performance.now();
     });
   }
 
@@ -93,6 +108,14 @@ export class Player extends EventTarget {
     return `pos=${this.pos}/${this.order.length} upNext=${this.upNext.length} fromQueue=${this.fromQueue} shuffle=${this.shuffle} repeat=${this.repeat}`;
   }
 
+  hiddenSeconds() {
+    return this.hiddenAt ? Math.round((performance.now() - this.hiddenAt) / 1000) : 0;
+  }
+
+  sessionQuiet() {
+    return document.visibilityState === 'hidden' && performance.now() - this.userSessionAt > USER_SESSION_WINDOW;
+  }
+
   trace(action, detail = '') {
     logDebug(`player.${action}`, () => `${typeof detail === 'function' ? detail() : detail} | ${this.describeQueue()}`.trimStart());
   }
@@ -120,8 +143,14 @@ export class Player extends EventTarget {
     });
     for (const type of ['play', 'pause']) {
       audio.addEventListener(type, () => {
-        if (navigator.mediaSession) navigator.mediaSession.playbackState = audio.paused ? 'paused' : 'playing';
-        logDebug('session.playbackState', audio.paused ? 'paused' : 'playing');
+        const state = audio.paused ? 'paused' : 'playing';
+        if (this.sessionQuiet()) {
+          logEvent('session.hold', `playbackState=${state} hidden=${this.hiddenSeconds()}s`);
+          this.emit('playstate');
+          return;
+        }
+        if (navigator.mediaSession) navigator.mediaSession.playbackState = state;
+        logDebug('session.playbackState', state);
         this.emit('playstate');
       });
     }
@@ -148,6 +177,7 @@ export class Player extends EventTarget {
     for (const [action, handler] of Object.entries(handlers)) {
       try {
         session.setActionHandler(action, details => {
+          this.userSessionAt = performance.now();
           logEvent(`session:${action}`, `${this.describeState()} ${JSON.stringify(details ?? {})}`);
           handler(details);
         });
@@ -159,6 +189,11 @@ export class Player extends EventTarget {
 
   async updateMediaSession(track) {
     if (!navigator.mediaSession) return;
+    if (this.sessionQuiet()) {
+      this.metadataAt = performance.now();
+      logEvent('session.hold', `metadata ${track.id} hidden=${this.hiddenSeconds()}s`);
+      return;
+    }
     await this.refreshArtwork(track);
     if (this.current !== track.id || !this.artwork) return;
     this.metadataAt = performance.now();
@@ -183,6 +218,7 @@ export class Player extends EventTarget {
   updatePositionState() {
     const { duration, currentTime, playbackRate } = this.audio;
     if (!navigator.mediaSession?.setPositionState || !Number.isFinite(duration)) return;
+    if (this.sessionQuiet()) return;
     try {
       navigator.mediaSession.setPositionState({ duration, playbackRate, position: Math.min(currentTime, duration) });
       logDebug('session.position', `${currentTime.toFixed(1)}/${duration.toFixed(1)} rate=${playbackRate}`);
@@ -203,6 +239,7 @@ export class Player extends EventTarget {
     this.updateMediaSession(track);
     this.retried = null;
     this.externalResumes = 0;
+    this.stalled = false;
     this.cancelResume();
     logEvent('load', id);
     this.trace('load', () => `${track.path} | ${track.artist ?? '-'} / ${track.album ?? '-'} / ${track.title}`);
@@ -277,6 +314,7 @@ export class Player extends EventTarget {
 
   pause() {
     this.wantPlay = false;
+    this.stalled = false;
     this.cancelResume();
     this.trace('pause', () => this.describeAudio());
     this.audio.pause();
@@ -294,9 +332,11 @@ export class Player extends EventTarget {
     const sinceMetadata = Math.round(performance.now() - this.metadataAt);
     const artwork = artworkScheme(this.artwork?.[0]?.src ?? '');
     const recoverable = currentTime < EXTERNAL_PAUSE_WINDOW && this.externalResumes < MAX_EXTERNAL_RESUMES;
-    logEvent('pause-external', () => `${this.describeState()} visible=${document.visibilityState} artwork=${artwork} sinceMetadata=${sinceMetadata}ms recover=${recoverable}`);
+    logEvent('pause-external', () => `${this.describeState()} visible=${document.visibilityState} hidden=${this.hiddenSeconds()}s artwork=${artwork} sinceMetadata=${sinceMetadata}ms recover=${recoverable}`);
     if (!recoverable) {
       this.wantPlay = false;
+      this.stalled = true;
+      logEvent('pause-stalled', `${this.current ?? '-'} externalResumes=${this.externalResumes}`);
       return;
     }
     this.externalResumes++;
