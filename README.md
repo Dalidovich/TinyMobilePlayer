@@ -50,7 +50,7 @@ After changing any cached file, bump the `CACHE` version in [sw.js](sw.js) so cl
 
 ## Diagnostics
 
-The app keeps an event log in IndexedDB (database `tiny-player-log`, last 20 000 entries). Playback, Media Session, page lifecycle events and errors are always recorded. Turning on Settings → Diagnostics → "Debug logs" adds very detailed entries: every `<audio>` event with buffer state, queue decisions, taps, swipes, dialog and sheet changes, tag parsing, cover generation, IndexedDB and OPFS operations, console output, network, battery, audio devices, long tasks and a memory heartbeat every 30 seconds.
+The app keeps an event log in IndexedDB (database `tiny-player-log`, last 20 000 entries). Playback, Media Session, page lifecycle events, pauses the app did not request and errors are always recorded. Turning on Settings → Diagnostics → "Debug logs" adds very detailed entries: every `<audio>` event with buffer state, queue decisions, taps, swipes, dialog and sheet changes, tag parsing, cover generation, IndexedDB and OPFS operations, console output, network, battery, audio devices, long tasks and a memory heartbeat every 30 seconds.
 
 "View log" opens the log newest first with search. From there it can be downloaded as a `.txt` file, shared via the system share sheet (where the browser supports sharing files) or cleared. The log never leaves the device unless exported.
 

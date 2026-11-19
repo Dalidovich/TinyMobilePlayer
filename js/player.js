@@ -3,6 +3,8 @@ import { describeError, logDebug, logEvent } from './diagnostics.js';
 const SETTINGS_KEY = 'tiny-player.settings';
 const RESTART_THRESHOLD = 3;
 const MAX_FAILURES = 5;
+const EXTERNAL_PAUSE_WINDOW = 3;
+const MAX_EXTERNAL_RESUMES = 2;
 const REPEAT_MODES = ['off', 'all', 'one'];
 const LOGGED_EVENTS = ['play', 'playing', 'pause', 'ended', 'waiting', 'stalled', 'abort', 'emptied'];
 const DEBUG_EVENTS = ['loadstart', 'suspend', 'loadedmetadata', 'loadeddata', 'canplay', 'canplaythrough', 'durationchange', 'seeking', 'seeked', 'ratechange', 'volumechange'];
@@ -40,6 +42,9 @@ export class Player extends EventTarget {
   failures = 0;
   objectUrl = null;
   retried = null;
+  wantPlay = false;
+  externalResumes = 0;
+  hasArtwork = false;
 
   constructor(library) {
     super();
@@ -108,6 +113,7 @@ export class Player extends EventTarget {
         this.emit('playstate');
       });
     }
+    audio.addEventListener('pause', () => this.handlePause());
     audio.addEventListener('timeupdate', () => this.emit('time'));
     for (const type of ['loadedmetadata', 'seeked', 'ratechange']) {
       audio.addEventListener(type, () => this.updatePositionState());
@@ -120,7 +126,7 @@ export class Player extends EventTarget {
     if (!session) return;
     const handlers = {
       play: () => this.play(),
-      pause: () => this.audio.pause(),
+      pause: () => this.pause(),
       previoustrack: () => this.prev(),
       nexttrack: () => this.next(),
       seekto: details => this.seek(details.seekTime),
@@ -144,6 +150,7 @@ export class Player extends EventTarget {
     const cover = await this.library.coverUrl(track.cover, 'full');
     if (this.current !== track.id) return;
     logDebug('session.metadata', `${track.id} cover=${!!cover}`);
+    this.hasArtwork = !!cover;
     navigator.mediaSession.metadata = new MediaMetadata({
       title: track.title,
       artist: track.artist ?? '',
@@ -174,6 +181,7 @@ export class Player extends EventTarget {
     this.emit('queue');
     this.updateMediaSession(track);
     this.retried = null;
+    this.externalResumes = 0;
     logEvent('load', id);
     this.trace('load', () => `${track.path} | ${track.artist ?? '-'} / ${track.album ?? '-'} / ${track.title}`);
     const file = this.library.getFile(track);
@@ -215,6 +223,7 @@ export class Player extends EventTarget {
 
   play() {
     this.trace('play', () => this.describeAudio());
+    this.wantPlay = true;
     if (!this.current && this.upNext.length) {
       this.next();
       return;
@@ -229,6 +238,7 @@ export class Player extends EventTarget {
       return;
     }
     this.audio.play().then(() => logDebug('play-resolved', () => this.describeState())).catch(error => {
+      this.wantPlay = false;
       logEvent('play-rejected', `${error.name}: ${error.message} ${this.describeState()}`);
       this.emit('playstate');
     });
@@ -243,10 +253,31 @@ export class Player extends EventTarget {
     this.audio.load();
   }
 
+  pause() {
+    this.wantPlay = false;
+    this.trace('pause', () => this.describeAudio());
+    this.audio.pause();
+  }
+
+  handlePause() {
+    const { currentTime, duration, ended } = this.audio;
+    if (!this.wantPlay || ended) return;
+    if (Number.isFinite(duration) && currentTime >= duration - 1) return;
+    const recoverable = currentTime < EXTERNAL_PAUSE_WINDOW && this.externalResumes < MAX_EXTERNAL_RESUMES;
+    logEvent('pause-external', () => `${this.describeState()} visible=${document.visibilityState} artwork=${this.hasArtwork} recover=${recoverable}`);
+    if (!recoverable) {
+      this.wantPlay = false;
+      return;
+    }
+    this.externalResumes++;
+    logEvent('pause-recover', `${this.current ?? '-'} attempt=${this.externalResumes} t=${currentTime.toFixed(1)}`);
+    this.play();
+  }
+
   toggle() {
     this.trace('toggle', this.audio.paused ? 'play' : 'pause');
     if (this.audio.paused) this.play();
-    else this.audio.pause();
+    else this.pause();
   }
 
   seek(seconds) {
@@ -280,7 +311,7 @@ export class Player extends EventTarget {
     logEvent('skip-failed', `${id} failures=${this.failures}`);
     this.emit('error');
     if (this.failures < MAX_FAILURES && this.hasNext()) this.next(true, true);
-    else this.audio.pause();
+    else this.pause();
   }
 
   hasNext() {
@@ -317,7 +348,7 @@ export class Player extends EventTarget {
       this.load(this.order[0]);
     } else if (auto) {
       logEvent('queue-end');
-      this.audio.pause();
+      this.pause();
       this.audio.currentTime = 0;
     }
   }
@@ -455,10 +486,11 @@ export class Player extends EventTarget {
 
   stop() {
     logEvent('stop', this.describeState());
-    this.audio.pause();
+    this.pause();
     this.releaseSource();
     this.current = null;
     this.fromQueue = false;
+    this.hasArtwork = false;
     if (navigator.mediaSession) navigator.mediaSession.metadata = null;
   }
 
