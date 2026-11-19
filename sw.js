@@ -1,4 +1,4 @@
-const CACHE = 'tiny-player-v11';
+const CACHE = 'tiny-player-v12';
 const ASSETS = [
   './',
   'index.html',

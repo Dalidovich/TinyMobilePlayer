@@ -6,6 +6,14 @@ const MEGABYTE = 1024 ** 2;
 
 const megabytes = bytes => `${(bytes / MEGABYTE).toFixed(1)}MB`;
 
+async function cacheNames() {
+  try {
+    return (await caches.keys()).sort().join(',') || '-';
+  } catch {
+    return '-';
+  }
+}
+
 function describeTarget(target) {
   if (!(target instanceof Element)) return String(target);
   const id = target.id ? `#${target.id}` : '';
@@ -110,6 +118,7 @@ export async function environmentLines() {
     `cpu: ${navigator.hardwareConcurrency ?? '-'} memory: ${navigator.deviceMemory ?? '-'}GB ${memoryUsage()}`,
     `storage: ${estimate ? `${megabytes(estimate.usage)} / ${megabytes(estimate.quota)}` : '-'} persisted=${persisted ?? '-'}`,
     `serviceWorker: ${navigator.serviceWorker?.controller ? 'controlled' : 'none'}`,
+    `cache: ${await cacheNames()}`,
     `debug: ${debugEnabled()}`,
   ];
 }
