@@ -4,7 +4,9 @@ const SETTINGS_KEY = 'tiny-player.settings';
 const RESTART_THRESHOLD = 3;
 const MAX_FAILURES = 5;
 const EXTERNAL_PAUSE_WINDOW = 3;
-const MAX_EXTERNAL_RESUMES = 2;
+const MAX_EXTERNAL_RESUMES = 4;
+const EXTERNAL_RESUME_DELAY = 250;
+const FALLBACK_ARTWORK = 'icon-512.png';
 const REPEAT_MODES = ['off', 'all', 'one'];
 const LOGGED_EVENTS = ['play', 'playing', 'pause', 'ended', 'waiting', 'stalled', 'abort', 'emptied'];
 const DEBUG_EVENTS = ['loadstart', 'suspend', 'loadedmetadata', 'loadeddata', 'canplay', 'canplaythrough', 'durationchange', 'seeking', 'seeked', 'ratechange', 'volumechange'];
@@ -45,6 +47,8 @@ export class Player extends EventTarget {
   wantPlay = false;
   externalResumes = 0;
   hasArtwork = false;
+  resumeTimer = 0;
+  metadataAt = 0;
 
   constructor(library) {
     super();
@@ -151,11 +155,16 @@ export class Player extends EventTarget {
     if (this.current !== track.id) return;
     logDebug('session.metadata', `${track.id} cover=${!!cover}`);
     this.hasArtwork = !!cover;
+    this.metadataAt = performance.now();
     navigator.mediaSession.metadata = new MediaMetadata({
       title: track.title,
       artist: track.artist ?? '',
       album: track.album ?? '',
-      artwork: cover ? [{ src: cover, sizes: '512x512', type: 'image/webp' }] : [],
+      artwork: [{
+        src: cover ?? FALLBACK_ARTWORK,
+        sizes: '512x512',
+        type: cover ? 'image/webp' : 'image/png',
+      }],
     });
   }
 
@@ -182,6 +191,7 @@ export class Player extends EventTarget {
     this.updateMediaSession(track);
     this.retried = null;
     this.externalResumes = 0;
+    this.cancelResume();
     logEvent('load', id);
     this.trace('load', () => `${track.path} | ${track.artist ?? '-'} / ${track.album ?? '-'} / ${track.title}`);
     const file = this.library.getFile(track);
@@ -255,23 +265,35 @@ export class Player extends EventTarget {
 
   pause() {
     this.wantPlay = false;
+    this.cancelResume();
     this.trace('pause', () => this.describeAudio());
     this.audio.pause();
+  }
+
+  cancelResume() {
+    clearTimeout(this.resumeTimer);
+    this.resumeTimer = 0;
   }
 
   handlePause() {
     const { currentTime, duration, ended } = this.audio;
     if (!this.wantPlay || ended) return;
     if (Number.isFinite(duration) && currentTime >= duration - 1) return;
+    const sinceMetadata = Math.round(performance.now() - this.metadataAt);
     const recoverable = currentTime < EXTERNAL_PAUSE_WINDOW && this.externalResumes < MAX_EXTERNAL_RESUMES;
-    logEvent('pause-external', () => `${this.describeState()} visible=${document.visibilityState} artwork=${this.hasArtwork} recover=${recoverable}`);
+    logEvent('pause-external', () => `${this.describeState()} visible=${document.visibilityState} cover=${this.hasArtwork} sinceMetadata=${sinceMetadata}ms recover=${recoverable}`);
     if (!recoverable) {
       this.wantPlay = false;
       return;
     }
     this.externalResumes++;
-    logEvent('pause-recover', `${this.current ?? '-'} attempt=${this.externalResumes} t=${currentTime.toFixed(1)}`);
-    this.play();
+    const delay = EXTERNAL_RESUME_DELAY * this.externalResumes;
+    logEvent('pause-recover', `${this.current ?? '-'} attempt=${this.externalResumes} delay=${delay}ms t=${currentTime.toFixed(1)}`);
+    this.cancelResume();
+    this.resumeTimer = setTimeout(() => {
+      this.resumeTimer = 0;
+      this.play();
+    }, delay);
   }
 
   toggle() {
@@ -491,6 +513,7 @@ export class Player extends EventTarget {
     this.current = null;
     this.fromQueue = false;
     this.hasArtwork = false;
+    this.cancelResume();
     if (navigator.mediaSession) navigator.mediaSession.metadata = null;
   }
 
