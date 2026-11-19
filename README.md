@@ -9,6 +9,7 @@ Plain HTML, CSS and JavaScript modules. No frameworks, no build step, no depende
 - Pick a music folder or individual audio files
 - Reads tags and embedded cover art from ID3 (MP3), FLAC, Ogg/Opus Vorbis comments and MP4/M4A; falls back to `cover.jpg` / `folder.jpg`-style images in the folder
 - Fast search across the library, virtualized list for large collections
+- Sort the library list by track name (A–Z, Z–A) or by file date (newest or oldest first), remembered between launches
 - Play all / shuffle all, shuffle and repeat (off / all / one) modes, remembered between launches
 - Queue: "Play next", "Add to queue", drag-to-reorder, remove, move to top
 - Full-screen "Now playing" sheet with seek bar and swipe between tracks

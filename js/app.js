@@ -1,5 +1,5 @@
 import { AUTO, SUPPORTED, initI18n, languageName, languageSetting, setLanguage, t } from './i18n.js';
-import { Library, folderNameOf } from './library.js';
+import { Library, SORT_MODES, folderNameOf } from './library.js';
 import { loadLibrary, saveLibrary } from './library-cache.js';
 import { clearStoredFiles, freeSpace, loadStoredFiles, offlineSupported, readStoredFile, removeStoredFiles, storeFiles } from './offline-store.js';
 import { clearLog, debugEnabled, describeError, formatEntry, logDebug, logError, logEvent, readLog, setDebug } from './diagnostics.js';
@@ -15,10 +15,23 @@ const UPCOMING_LIMIT = 100;
 const TOAST_MS = 2500;
 const FOLDER_KEY = 'tiny-player.folder';
 const OFFLINE_KEY = 'tiny-player.offline';
+const SORT_KEY = 'tiny-player.sort';
 const GIGABYTE = 1024 ** 3;
 const MEGABYTE = 1024 ** 2;
 const LOG_VIEW_LIMIT = 3000;
 const LOG_URL_TTL_MS = 10000;
+
+const SORT_LABELS = {
+  'name-asc': 'sort.nameAsc',
+  'name-desc': 'sort.nameDesc',
+  'date-desc': 'sort.dateDesc',
+  'date-asc': 'sort.dateAsc',
+};
+
+function readSortMode() {
+  const stored = localStorage.getItem(SORT_KEY);
+  return SORT_MODES.includes(stored) ? stored : SORT_MODES[0];
+}
 
 const $ = id => document.getElementById(id);
 
@@ -34,6 +47,7 @@ let storingTask = null;
 let stopStoring = false;
 let storeAgain = false;
 let logLines = [];
+let sortMode = readSortMode();
 
 installProbes({
   snapshot: () => `${player.describeAudio()} | ${player.describeQueue()} tracks=${library.tracks.length} files=${library.files.size}`,
@@ -107,17 +121,36 @@ function createTrackList() {
 
 function applyFilter() {
   const terms = $('search').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  visible = terms.length
+  const matching = terms.length
     ? library.tracks.filter(track => terms.every(term => track.search.includes(term)))
     : library.tracks;
+  visible = library.sortedTracks(matching, sortMode);
   trackList.setItems(visible);
-  logDebug('filter', () => `"${terms.join(' ')}" -> ${visible.length} of ${library.tracks.length}`);
+  logDebug('filter', () => `"${terms.join(' ')}" sort=${sortMode} -> ${visible.length} of ${library.tracks.length}`);
   const hasTracks = library.tracks.length > 0;
   $('empty').hidden = hasTracks;
   $('library').hidden = !hasTracks;
   $('list-bar').hidden = !hasTracks;
   $('no-results').hidden = !hasTracks || visible.length > 0;
   $('count').textContent = t('tracks', { count: visible.length });
+}
+
+function renderSort() {
+  const button = $('sort-btn');
+  const label = `${t('sort.label')}: ${t(SORT_LABELS[sortMode])}`;
+  button.setAttribute('aria-label', label);
+  button.title = label;
+}
+
+function cycleSort() {
+  const index = SORT_MODES.indexOf(sortMode);
+  sortMode = SORT_MODES[(index + 1) % SORT_MODES.length];
+  localStorage.setItem(SORT_KEY, sortMode);
+  logEvent('sort', sortMode);
+  renderSort();
+  applyFilter();
+  $('library').scrollTop = 0;
+  toast(t('sort.changed', { mode: t(SORT_LABELS[sortMode]) }));
 }
 
 function renderTrack() {
@@ -412,6 +445,7 @@ function renderTexts() {
   renderLanguageOptions();
   renderOfflineSetting();
   renderVersion();
+  renderSort();
   applyFilter();
   renderTrack();
   renderQueue();
@@ -639,6 +673,7 @@ $('search').addEventListener('input', () => {
 });
 
 $('menu-btn').addEventListener('click', () => $('menu').showModal());
+$('sort-btn').addEventListener('click', cycleSort);
 $('folder-input').addEventListener('change', event => importFiles(event.target, true));
 $('files-input').addEventListener('change', event => importFiles(event.target, false));
 
@@ -749,6 +784,7 @@ async function init() {
   renderDebugSetting();
   $('share-log').hidden = !canShareFiles();
   renderFolderHint();
+  renderSort();
   player.restoreSettings();
   applyFilter();
   renderTrack();

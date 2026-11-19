@@ -25,11 +25,17 @@ const pathOf = file => file.webkitRelativePath || file.name;
 const folderOf = path => path.slice(0, path.lastIndexOf('/') + 1);
 const baseName = name => name.replace(/\.[^.]+$/, '');
 
+export const SORT_MODES = ['name-asc', 'name-desc', 'date-desc', 'date-asc'];
+
 function compareTracks(a, b) {
   return collator.compare(a.artist ?? '￿', b.artist ?? '￿')
     || collator.compare(a.album ?? '￿', b.album ?? '￿')
     || (a.trackNo ?? 1e9) - (b.trackNo ?? 1e9)
     || collator.compare(a.title, b.title);
+}
+
+function compareTitles(a, b) {
+  return collator.compare(a.title, b.title) || collator.compare(a.artist ?? '', b.artist ?? '');
 }
 
 async function resizeImage(bitmap, maxSize) {
@@ -99,6 +105,26 @@ export class Library extends EventTarget {
 
   getFile(track) {
     return this.files.get(track.id);
+  }
+
+  sortedTracks(list, mode) {
+    const sorted = [...list];
+    const order = mode === 'date-desc' ? -1 : mode === 'date-asc' ? 1 : 0;
+    if (order) {
+      const dates = new Map(sorted.map(track => [track.id, this.dateOf(track)]));
+      sorted.sort((a, b) => order * (dates.get(a.id) - dates.get(b.id)) || compareTitles(a, b));
+    } else if (mode === 'name-desc') {
+      sorted.sort((a, b) => compareTitles(b, a));
+    } else {
+      sorted.sort(compareTitles);
+    }
+    return sorted;
+  }
+
+  dateOf(track) {
+    const file = this.files.get(track.id);
+    if (file) track.date = file.lastModified;
+    return track.date ?? 0;
   }
 
   async reloadFile(track) {
@@ -226,6 +252,7 @@ export class Library extends EventTarget {
       artist: tags.artist,
       album: tags.album,
       trackNo: tags.track,
+      date: file.lastModified,
       cover,
       search: [tags.title ?? file.name, tags.artist, tags.album].filter(Boolean).join(' ').toLowerCase(),
     };
