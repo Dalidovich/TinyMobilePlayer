@@ -10,8 +10,8 @@ const STALL_RETRY_DELAY = 15000;
 const STALL_RETRY_LIMIT = 20;
 const RETRY_AUDIBLE_AFTER = 0.5;
 const REBUILD_ATTEMPTS = new Set([3, 10]);
-const HANDOVER_LEAD = 4;
-const HANDOVER_FADE_STEP = 150;
+const HANDOVER_LEAD = 2;
+const HANDOVER_FADE_STEP = 120;
 const HANDOVER_MAX_ATTEMPTS = 3;
 const HANDOVER_RETRY_DELAY = 200;
 const FALLBACK_ARTWORK = 'icon-512.png';
@@ -169,7 +169,7 @@ export class Player extends EventTarget {
     const { currentTime, duration } = audio;
     if (!Number.isFinite(duration)) return;
     const remaining = duration - currentTime;
-    if (remaining > HANDOVER_LEAD || remaining <= 0) return;
+    if (remaining > HANDOVER_LEAD || remaining < 0.5) return;
     this.beginHandover(remaining);
   }
 
@@ -224,6 +224,7 @@ export class Player extends EventTarget {
     logEvent('handover-paused', `${incoming.track.id} attempt=${incoming.attempts} hidden=${this.hiddenSeconds()}s`);
     if (incoming.attempts >= HANDOVER_MAX_ATTEMPTS) {
       this.abortHandover('paused');
+      if (this.wantPlay && this.audio.paused) this.play();
       return;
     }
     incoming.attempts++;
@@ -309,7 +310,7 @@ export class Player extends EventTarget {
       });
     }
     audio.addEventListener('ended', () => {
-      if (active()) this.next(true);
+      if (active() && !this.incoming) this.next(true);
     });
     audio.addEventListener('playing', () => {
       if (active()) this.failures = 0;
@@ -505,6 +506,7 @@ export class Player extends EventTarget {
   }
 
   handlePause() {
+    if (this.incoming) return;
     const { currentTime, duration, ended } = this.audio;
     if (!this.wantPlay || ended) return;
     if (Number.isFinite(duration) && currentTime >= duration - 1) return;
