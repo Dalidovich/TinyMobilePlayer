@@ -46,6 +46,8 @@
   "openFolder": "Open folder «{name}»",
   "label.toTop": "Move to top",
   "settings.title": "Settings",
+  "settings.version": "Version {version}",
+  "settings.versionUpdate": "Version {version} · update available, restart the app",
   "settings.language": "Language",
   "settings.languageAuto": "System language",
   "relink.folder": "Open folder «{name}» to play music",

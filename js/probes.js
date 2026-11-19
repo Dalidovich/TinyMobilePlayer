@@ -1,18 +1,11 @@
 import { debugEnabled, describeError, logDebug, logError, logEvent } from './diagnostics.js';
+import { APP_VERSION, cacheVersionLabel } from './version.js';
 
 const HEARTBEAT_MS = 30000;
 const CONSOLE_LEVELS = ['log', 'info', 'warn', 'error', 'debug'];
 const MEGABYTE = 1024 ** 2;
 
 const megabytes = bytes => `${(bytes / MEGABYTE).toFixed(1)}MB`;
-
-async function cacheNames() {
-  try {
-    return (await caches.keys()).sort().join(',') || '-';
-  } catch {
-    return '-';
-  }
-}
 
 function describeTarget(target) {
   if (!(target instanceof Element)) return String(target);
@@ -118,7 +111,7 @@ export async function environmentLines() {
     `cpu: ${navigator.hardwareConcurrency ?? '-'} memory: ${navigator.deviceMemory ?? '-'}GB ${memoryUsage()}`,
     `storage: ${estimate ? `${megabytes(estimate.usage)} / ${megabytes(estimate.quota)}` : '-'} persisted=${persisted ?? '-'}`,
     `serviceWorker: ${navigator.serviceWorker?.controller ? 'controlled' : 'none'}`,
-    `cache: ${await cacheNames()}`,
+    `version: v${APP_VERSION} cache: ${await cacheVersionLabel()}`,
     `debug: ${debugEnabled()}`,
   ];
 }

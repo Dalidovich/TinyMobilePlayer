@@ -17,6 +17,7 @@ Plain HTML, CSS and JavaScript modules. No frameworks, no build step, no depende
 - Installable to the home screen
 - English and Russian UI, chosen from the browser language or set manually in Settings
 - Diagnostics log with an optional debug mode (Settings → Diagnostics): view, search, download, share and clear it on the device
+- Build version shown in Settings, with a hint when a newer build is already cached and needs a restart
 
 Supported formats depend on the browser: typically MP3, M4A/M4B, AAC, FLAC, OGG/OGA, Opus, WAV, WebM.
 

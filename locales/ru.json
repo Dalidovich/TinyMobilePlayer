@@ -48,6 +48,8 @@
   "openFolder": "Открыть папку «{name}»",
   "label.toTop": "Наверх",
   "settings.title": "Настройки",
+  "settings.version": "Версия {version}",
+  "settings.versionUpdate": "Версия {version} · доступно обновление, перезапустите приложение",
   "settings.language": "Язык",
   "settings.languageAuto": "Как в системе",
   "relink.folder": "Откройте папку «{name}», чтобы слушать музыку",

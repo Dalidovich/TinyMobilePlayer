@@ -8,6 +8,7 @@ import { Player } from './player.js';
 import { VirtualList } from './virtual-list.js';
 import { sortable } from './sortable.js';
 import { swipeable } from './swipe.js';
+import { APP_VERSION, hasPendingUpdate } from './version.js';
 
 const ROW_HEIGHT = 64;
 const UPCOMING_LIMIT = 100;
@@ -410,6 +411,7 @@ function renderTexts() {
   renderFolderHint();
   renderLanguageOptions();
   renderOfflineSetting();
+  renderVersion();
   applyFilter();
   renderTrack();
   renderQueue();
@@ -417,6 +419,12 @@ function renderTexts() {
 
 function renderDebugSetting() {
   $('debug-toggle').setAttribute('aria-checked', String(debugEnabled()));
+}
+
+async function renderVersion() {
+  const version = `v${APP_VERSION}`;
+  const key = await hasPendingUpdate() ? 'settings.versionUpdate' : 'settings.version';
+  $('app-version').textContent = t(key, { version });
 }
 
 function toggleDebug() {
@@ -561,6 +569,7 @@ const actions = {
     renderLanguageOptions();
     renderOfflineSetting();
     renderDebugSetting();
+    renderVersion();
     $('settings').showModal();
   },
   'open-log': () => {

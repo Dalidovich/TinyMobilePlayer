@@ -634,6 +634,12 @@ body:has(#no-results:not([hidden])) .library {
   letter-spacing: 0.04em;
 }
 
+.sheet-note {
+  margin: 8px 20px 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .action-sheet .switch-row {
   height: auto;
   min-height: 64px;
