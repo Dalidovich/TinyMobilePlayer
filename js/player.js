@@ -32,6 +32,11 @@ function move(list, from, to) {
   list.splice(to, 0, item);
 }
 
+function artworkScheme(src) {
+  const match = /^([a-z][a-z0-9+.-]*):/i.exec(src ?? '');
+  return match ? match[1] : '-';
+}
+
 export class Player extends EventTarget {
   base = [];
   order = [];
@@ -46,7 +51,7 @@ export class Player extends EventTarget {
   retried = null;
   wantPlay = false;
   externalResumes = 0;
-  hasArtwork = false;
+  artwork = null;
   resumeTimer = 0;
   metadataAt = 0;
 
@@ -57,6 +62,9 @@ export class Player extends EventTarget {
     this.audio.preload = 'auto';
     this.bindAudio();
     this.bindMediaSession();
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && this.track) this.updateMediaSession(this.track);
+    });
   }
 
   get track() {
@@ -151,21 +159,25 @@ export class Player extends EventTarget {
 
   async updateMediaSession(track) {
     if (!navigator.mediaSession) return;
-    const cover = await this.library.coverUrl(track.cover, 'full');
-    if (this.current !== track.id) return;
-    logDebug('session.metadata', `${track.id} cover=${!!cover}`);
-    this.hasArtwork = !!cover;
+    await this.refreshArtwork(track);
+    if (this.current !== track.id || !this.artwork) return;
     this.metadataAt = performance.now();
+    logDebug('session.metadata', `${track.id} artwork=${artworkScheme(this.artwork[0].src)}`);
     navigator.mediaSession.metadata = new MediaMetadata({
       title: track.title,
       artist: track.artist ?? '',
       album: track.album ?? '',
-      artwork: [{
-        src: cover ?? FALLBACK_ARTWORK,
-        sizes: '512x512',
-        type: cover ? 'image/webp' : 'image/png',
-      }],
+      artwork: this.artwork,
     });
+  }
+
+  async refreshArtwork(track) {
+    if (this.artwork && document.visibilityState === 'hidden') return;
+    const cover = await this.library.coverUrl(track.cover, 'full');
+    if (this.current !== track.id) return;
+    this.artwork = cover
+      ? [{ src: cover, sizes: '512x512', type: 'image/webp' }]
+      : [{ src: new URL(FALLBACK_ARTWORK, document.baseURI).href, sizes: '512x512', type: 'image/png' }];
   }
 
   updatePositionState() {
@@ -280,8 +292,9 @@ export class Player extends EventTarget {
     if (!this.wantPlay || ended) return;
     if (Number.isFinite(duration) && currentTime >= duration - 1) return;
     const sinceMetadata = Math.round(performance.now() - this.metadataAt);
+    const artwork = artworkScheme(this.artwork?.[0]?.src ?? '');
     const recoverable = currentTime < EXTERNAL_PAUSE_WINDOW && this.externalResumes < MAX_EXTERNAL_RESUMES;
-    logEvent('pause-external', () => `${this.describeState()} visible=${document.visibilityState} cover=${this.hasArtwork} sinceMetadata=${sinceMetadata}ms recover=${recoverable}`);
+    logEvent('pause-external', () => `${this.describeState()} visible=${document.visibilityState} artwork=${artwork} sinceMetadata=${sinceMetadata}ms recover=${recoverable}`);
     if (!recoverable) {
       this.wantPlay = false;
       return;
@@ -512,7 +525,7 @@ export class Player extends EventTarget {
     this.releaseSource();
     this.current = null;
     this.fromQueue = false;
-    this.hasArtwork = false;
+    this.artwork = null;
     this.cancelResume();
     if (navigator.mediaSession) navigator.mediaSession.metadata = null;
   }
