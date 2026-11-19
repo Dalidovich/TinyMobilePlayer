@@ -10,6 +10,10 @@ const STALL_RETRY_DELAY = 15000;
 const STALL_RETRY_LIMIT = 20;
 const RETRY_AUDIBLE_AFTER = 0.5;
 const REBUILD_ATTEMPTS = new Set([3, 10]);
+const HANDOVER_LEAD = 4;
+const HANDOVER_FADE_STEP = 150;
+const HANDOVER_MAX_ATTEMPTS = 3;
+const HANDOVER_RETRY_DELAY = 200;
 const FALLBACK_ARTWORK = 'icon-512.png';
 const REPEAT_MODES = ['off', 'all', 'one'];
 const LOGGED_EVENTS = ['play', 'playing', 'pause', 'ended', 'waiting', 'stalled', 'abort', 'emptied'];
@@ -62,6 +66,8 @@ export class Player extends EventTarget {
   stalled = false;
   stallRetries = 0;
   retryMuted = false;
+  incoming = null;
+  handoverTried = false;
 
   constructor(library) {
     super();
@@ -139,6 +145,142 @@ export class Player extends EventTarget {
     this.emit('playstate');
   }
 
+  handoverTarget() {
+    if (this.repeat === 'one') return null;
+    if (this.upNext.length) {
+      const id = this.upNext[0];
+      return { id, commit: () => { this.fromQueue = true; this.upNext.shift(); } };
+    }
+    if (this.pos + 1 < this.order.length) {
+      const id = this.order[this.pos + 1];
+      return { id, commit: () => { this.pos++; this.fromQueue = false; } };
+    }
+    if (this.order.length && this.repeat === 'all' && !this.shuffle) {
+      const id = this.order[0];
+      return { id, commit: () => { this.pos = 0; this.fromQueue = false; } };
+    }
+    return null;
+  }
+
+  maybeHandover(audio) {
+    if (this.incoming || this.handoverTried || this.stalled) return;
+    if (!this.wantPlay || audio.paused) return;
+    if (document.visibilityState !== 'hidden') return;
+    const { currentTime, duration } = audio;
+    if (!Number.isFinite(duration)) return;
+    const remaining = duration - currentTime;
+    if (remaining > HANDOVER_LEAD || remaining <= 0) return;
+    this.beginHandover(remaining);
+  }
+
+  beginHandover(remaining) {
+    const target = this.handoverTarget();
+    if (!target) return;
+    const track = this.library.byId.get(target.id);
+    const file = track ? this.library.getFile(track) : null;
+    if (!file) return;
+    this.handoverTried = true;
+    const element = new Audio();
+    element.preload = 'auto';
+    element.muted = this.retryMuted;
+    const url = URL.createObjectURL(file);
+    element.src = url;
+    const incoming = { element, target, track, url, attempts: 0, timer: 0 };
+    this.incoming = incoming;
+    logEvent('handover-start', `${track.id} remaining=${remaining.toFixed(1)}s hidden=${this.hiddenSeconds()}s`);
+    element.addEventListener('playing', () => {
+      if (this.incoming !== incoming) return;
+      logEvent('handover-playing', `${track.id} hidden=${this.hiddenSeconds()}s`);
+      this.settleHandover(incoming);
+    });
+    element.addEventListener('pause', () => {
+      if (this.incoming !== incoming) return;
+      this.retryHandover(incoming);
+    });
+    element.play().catch(error => {
+      if (this.incoming !== incoming) return;
+      logEvent('handover-rejected', `${track.id} ${error.name}`);
+      this.abortHandover('rejected');
+    });
+  }
+
+  settleHandover(incoming) {
+    clearTimeout(incoming.timer);
+    const audio = this.audio;
+    audio.volume = 0.6;
+    incoming.timer = setTimeout(() => {
+      if (this.incoming !== incoming) return;
+      audio.volume = 0.25;
+      incoming.timer = setTimeout(() => {
+        if (this.incoming !== incoming) return;
+        this.finishHandover(incoming);
+      }, HANDOVER_FADE_STEP);
+    }, HANDOVER_FADE_STEP);
+  }
+
+  retryHandover(incoming) {
+    clearTimeout(incoming.timer);
+    this.audio.volume = 1;
+    logEvent('handover-paused', `${incoming.track.id} attempt=${incoming.attempts} hidden=${this.hiddenSeconds()}s`);
+    if (incoming.attempts >= HANDOVER_MAX_ATTEMPTS) {
+      this.abortHandover('paused');
+      return;
+    }
+    incoming.attempts++;
+    incoming.timer = setTimeout(() => {
+      if (this.incoming !== incoming) return;
+      incoming.element.play().catch(() => this.abortHandover('rejected'));
+    }, HANDOVER_RETRY_DELAY);
+  }
+
+  finishHandover(incoming) {
+    const previous = this.audio;
+    const previousUrl = previous.src;
+    const { target, track, url, element } = incoming;
+    clearTimeout(incoming.timer);
+    this.incoming = null;
+    this.handoverTried = false;
+    target.commit();
+    this.current = track.id;
+    this.objectUrl = url;
+    this.audio = element;
+    this.bindAudio();
+    this.retried = null;
+    this.externalResumes = 0;
+    this.stalled = false;
+    this.stallRetries = 0;
+    this.cancelResume();
+    previous.volume = 1;
+    previous.pause();
+    previous.removeAttribute('src');
+    previous.load();
+    if (previousUrl.startsWith('blob:')) URL.revokeObjectURL(previousUrl);
+    if (navigator.mediaSession) navigator.mediaSession.playbackState = 'playing';
+    logEvent('handover-done', `${track.id} hidden=${this.hiddenSeconds()}s`);
+    this.emit('playstate');
+    this.emit('track');
+    this.emit('queue');
+    this.updateMediaSession(track);
+  }
+
+  abortHandover(reason) {
+    const incoming = this.incoming;
+    if (!incoming) return;
+    clearTimeout(incoming.timer);
+    this.incoming = null;
+    this.audio.volume = 1;
+    const { element, track, url, attempts } = incoming;
+    logEvent('handover-abort', `${track.id} reason=${reason} attempts=${attempts} hidden=${this.hiddenSeconds()}s`);
+    element.pause();
+    element.removeAttribute('src');
+    element.load();
+    URL.revokeObjectURL(url);
+  }
+
+  cancelHandover() {
+    if (this.incoming) this.abortHandover('cancelled');
+  }
+
   trace(action, detail = '') {
     logDebug(`player.${action}`, () => `${typeof detail === 'function' ? detail() : detail} | ${this.describeQueue()}`.trimStart());
   }
@@ -187,6 +329,7 @@ export class Player extends EventTarget {
       if (!active()) return;
       if (this.stalled && audio.currentTime > EXTERNAL_PAUSE_WINDOW) this.stalled = false;
       if (this.retryMuted && audio.currentTime > RETRY_AUDIBLE_AFTER) this.unmuteRetry();
+      this.maybeHandover(audio);
       this.emit('time');
     });
     for (const type of ['loadedmetadata', 'seeked', 'ratechange']) {
@@ -270,6 +413,8 @@ export class Player extends EventTarget {
     this.externalResumes = 0;
     this.stalled = false;
     this.stallRetries = 0;
+    this.handoverTried = false;
+    this.cancelHandover();
     this.unmuteRetry();
     this.cancelResume();
     logEvent('load', id);
@@ -347,6 +492,7 @@ export class Player extends EventTarget {
     this.wantPlay = false;
     this.stalled = false;
     this.stallRetries = 0;
+    this.cancelHandover();
     this.unmuteRetry();
     this.cancelResume();
     this.trace('pause', () => this.describeAudio());
@@ -424,6 +570,7 @@ export class Player extends EventTarget {
     const duration = this.audio.duration;
     this.trace('seek', `${Number(seconds).toFixed(1)} of ${duration}`);
     if (!Number.isFinite(duration)) return;
+    this.cancelHandover();
     this.audio.currentTime = Math.max(0, Math.min(seconds, duration));
   }
 
