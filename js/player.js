@@ -9,6 +9,7 @@ const EXTERNAL_RESUME_DELAY = 250;
 const STALL_RETRY_DELAY = 15000;
 const STALL_RETRY_LIMIT = 20;
 const RETRY_AUDIBLE_AFTER = 0.5;
+const REBUILD_ATTEMPTS = new Set([3, 10]);
 const FALLBACK_ARTWORK = 'icon-512.png';
 const REPEAT_MODES = ['off', 'all', 'one'];
 const LOGGED_EVENTS = ['play', 'playing', 'pause', 'ended', 'waiting', 'stalled', 'abort', 'emptied'];
@@ -65,9 +66,7 @@ export class Player extends EventTarget {
   constructor(library) {
     super();
     this.library = library;
-    this.audio = new Audio();
-    this.audio.preload = 'auto';
-    this.bindAudio();
+    this.createAudio();
     this.bindMediaSession();
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
@@ -116,48 +115,88 @@ export class Player extends EventTarget {
     return this.hiddenAt ? Math.round((performance.now() - this.hiddenAt) / 1000) : 0;
   }
 
+  createAudio() {
+    const audio = new Audio();
+    audio.preload = 'auto';
+    audio.muted = this.retryMuted;
+    this.audio = audio;
+    this.bindAudio();
+    return audio;
+  }
+
+  rebuildAudio() {
+    const previous = this.audio;
+    const position = previous.currentTime;
+    logEvent('audio-rebuild', `${this.current ?? '-'} at ${position.toFixed(1)} hidden=${this.hiddenSeconds()}s`);
+    const audio = this.createAudio();
+    if (this.objectUrl) {
+      audio.src = this.objectUrl;
+      if (Number.isFinite(position) && position > 0) audio.currentTime = position;
+    }
+    previous.pause();
+    previous.removeAttribute('src');
+    previous.load();
+    this.emit('playstate');
+  }
+
   trace(action, detail = '') {
     logDebug(`player.${action}`, () => `${typeof detail === 'function' ? detail() : detail} | ${this.describeQueue()}`.trimStart());
   }
 
   bindAudio() {
     const audio = this.audio;
+    const active = () => audio === this.audio;
     for (const type of LOGGED_EVENTS) {
-      audio.addEventListener(type, () => logEvent(type, this.describeState()));
+      audio.addEventListener(type, () => {
+        if (active()) logEvent(type, this.describeState());
+      });
     }
     for (const type of DEBUG_EVENTS) {
-      audio.addEventListener(type, () => logDebug(type, () => this.describeAudio()));
+      audio.addEventListener(type, () => {
+        if (active()) logDebug(type, () => this.describeAudio());
+      });
     }
     for (const [type, interval] of Object.entries(THROTTLED_EVENTS)) {
       let last = 0;
       audio.addEventListener(type, () => {
+        if (!active()) return;
         const now = performance.now();
         if (now - last < interval) return;
         last = now;
         logDebug(type, () => this.describeAudio());
       });
     }
-    audio.addEventListener('ended', () => this.next(true));
+    audio.addEventListener('ended', () => {
+      if (active()) this.next(true);
+    });
     audio.addEventListener('playing', () => {
-      this.failures = 0;
+      if (active()) this.failures = 0;
     });
     for (const type of ['play', 'pause']) {
       audio.addEventListener(type, () => {
+        if (!active()) return;
         if (navigator.mediaSession) navigator.mediaSession.playbackState = audio.paused ? 'paused' : 'playing';
         logDebug('session.playbackState', audio.paused ? 'paused' : 'playing');
         this.emit('playstate');
       });
     }
-    audio.addEventListener('pause', () => this.handlePause());
+    audio.addEventListener('pause', () => {
+      if (active()) this.handlePause();
+    });
     audio.addEventListener('timeupdate', () => {
-      if (this.stalled && this.audio.currentTime > EXTERNAL_PAUSE_WINDOW) this.stalled = false;
-      if (this.retryMuted && this.audio.currentTime > RETRY_AUDIBLE_AFTER) this.unmuteRetry();
+      if (!active()) return;
+      if (this.stalled && audio.currentTime > EXTERNAL_PAUSE_WINDOW) this.stalled = false;
+      if (this.retryMuted && audio.currentTime > RETRY_AUDIBLE_AFTER) this.unmuteRetry();
       this.emit('time');
     });
     for (const type of ['loadedmetadata', 'seeked', 'ratechange']) {
-      audio.addEventListener(type, () => this.updatePositionState());
+      audio.addEventListener(type, () => {
+        if (active()) this.updatePositionState();
+      });
     }
-    audio.addEventListener('error', () => this.handleFailure());
+    audio.addEventListener('error', () => {
+      if (active()) this.handleFailure();
+    });
   }
 
   bindMediaSession() {
@@ -358,6 +397,7 @@ export class Player extends EventTarget {
       this.resumeTimer = 0;
       if (!this.stalled) return;
       this.muteRetry();
+      if (REBUILD_ATTEMPTS.has(this.stallRetries)) this.rebuildAudio();
       this.play();
     }, STALL_RETRY_DELAY);
   }

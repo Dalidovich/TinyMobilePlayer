@@ -1,6 +1,6 @@
 const CACHE_PREFIX = 'tiny-player-v';
 
-export const APP_VERSION = 18;
+export const APP_VERSION = 19;
 
 async function cacheVersions() {
   try {
