@@ -1,3 +1,5 @@
+import { describeError, logDebug } from './diagnostics.js';
+
 const MAX_TAG_BYTES = 24 * 1024 * 1024;
 const OGG_SCAN_BYTES = 1024 * 1024;
 
@@ -35,9 +37,11 @@ export async function readTags(file) {
     if (ascii(head, 0, 4) === 'fLaC') return await readFlac(file);
     if (ascii(head, 4, 4) === 'ftyp') return await readMp4(file);
     if (ascii(head, 0, 4) === 'OggS') return await readOgg(file);
-  } catch {
+  } catch (error) {
+    logDebug('tags-failed', `${file.name}: ${describeError(error)}`);
     return {};
   }
+  logDebug('tags-unknown-format', file.name);
   return {};
 }
 

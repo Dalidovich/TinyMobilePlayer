@@ -1,3 +1,4 @@
+import { describeError, logDebug, logEvent } from './diagnostics.js';
 import { readTags } from './tags.js';
 
 const AUDIO_FILE = /\.(mp3|m4a|m4b|aac|mp4|flac|ogg|oga|opus|wav|weba|webm)$/i;
@@ -44,9 +45,11 @@ async function makeCover(source) {
   try {
     const bitmap = await createImageBitmap(source);
     const [full, thumb] = await Promise.all([resizeImage(bitmap, COVER_SIZE), resizeImage(bitmap, THUMB_SIZE)]);
+    logDebug('cover', `${bitmap.width}x${bitmap.height} -> full=${full.size} thumb=${thumb.size}`);
     bitmap.close();
     return { full, thumb };
-  } catch {
+  } catch (error) {
+    logDebug('cover-failed', `${source.type || '-'} size=${source.size}: ${describeError(error)}`);
     return null;
   }
 }
@@ -99,7 +102,13 @@ export class Library extends EventTarget {
   }
 
   async reloadFile(track) {
-    const fresh = this.fileReloader ? await this.fileReloader(track.id).catch(() => null) : null;
+    const fresh = this.fileReloader
+      ? await this.fileReloader(track.id).catch(error => {
+        logEvent('reload-failed', `${track.id}: ${describeError(error)}`);
+        return null;
+      })
+      : null;
+    logDebug('library.reloadFile', `${track.id} fresh=${!!fresh} size=${fresh?.size ?? '-'}`);
     if (fresh) this.files.set(track.id, fresh);
     return fresh ?? this.getFile(track) ?? null;
   }
@@ -109,21 +118,28 @@ export class Library extends EventTarget {
   }
 
   attachFiles(files) {
+    let attached = 0;
     for (const [id, file] of files) {
-      if (this.byId.has(id) && !this.files.has(id)) this.files.set(id, file);
+      if (this.byId.has(id) && !this.files.has(id)) {
+        this.files.set(id, file);
+        attached++;
+      }
     }
+    logDebug('library.attachFiles', `${attached} of ${files.size}`);
   }
 
   detachFiles(files) {
     for (const [id, file] of files) {
       if (this.files.get(id) === file) this.files.delete(id);
     }
+    logDebug('library.detachFiles', `${files.size} remaining=${this.files.size}`);
   }
 
   restore({ tracks, covers }) {
     this.reset();
     for (const [key, blobs] of covers) this.covers.set(key, coverEntry(blobs));
     this.setTracks(tracks);
+    logDebug('library.restore', `tracks=${tracks.length} covers=${covers.size}`);
   }
 
   async snapshot() {
@@ -137,6 +153,9 @@ export class Library extends EventTarget {
   async link(fileList, { replace = false, onProgress } = {}) {
     const files = [...fileList];
     const audioFiles = files.filter(file => AUDIO_FILE.test(file.name));
+    const started = performance.now();
+    logEvent('link-start', `files=${files.length} audio=${audioFiles.length} replace=${replace} known=${this.tracks.length}`);
+    logDebug('link-skipped', () => files.filter(file => !AUDIO_FILE.test(file.name)).map(pathOf).join(' | '));
     if (!audioFiles.length) return 0;
     const previous = this.tracks;
     const known = this.byId;
@@ -161,11 +180,14 @@ export class Library extends EventTarget {
           if (!listed.has(id)) {
             listed.add(id);
             const cached = known.get(id);
+            if (cached) logDebug('link-cached', `${id} ${path}`);
             tracks.push(cached ?? await this.describe(file, path, id, folderCovers));
             if (!cached && ++described % PUBLISH_EVERY === 0) {
               this.setTracks([...tracks, ...previous.filter(track => !listed.has(track.id))]);
             }
           }
+        } else {
+          logDebug('link-duplicate', `${id} ${path}`);
         }
         onProgress?.(++done, audioFiles.length);
       }
@@ -173,21 +195,27 @@ export class Library extends EventTarget {
     await Promise.all(Array.from({ length: PARALLEL_READS }, readNext));
     this.setTracks(tracks);
     if (replace) this.pruneCovers();
+    logEvent('link-end', `tracks=${tracks.length} described=${described} covers=${this.covers.size} ms=${Math.round(performance.now() - started)}`);
     return audioFiles.length;
   }
 
   pruneCovers() {
     const used = new Set(this.tracks.map(track => track.cover));
+    let pruned = 0;
     for (const [key, entry] of this.covers) {
       if (used.has(key)) continue;
       revokeCover(entry);
       this.covers.delete(key);
+      pruned++;
     }
+    logDebug('library.pruneCovers', `pruned=${pruned} kept=${this.covers.size}`);
   }
 
   async describe(file, path, id, folderCovers) {
+    const started = performance.now();
     const tags = await readTags(file);
     const folder = folderOf(path);
+    logDebug('tags', () => `${id} ${path} size=${file.size} type=${file.type || '-'} title=${tags.title ?? '-'} artist=${tags.artist ?? '-'} album=${tags.album ?? '-'} track=${tags.track ?? '-'} picture=${tags.picture ? tags.picture.size : (folderCovers.has(folder) ? 'folder' : 'none')} ms=${Math.round(performance.now() - started)}`);
     const cover = hash((tags.artist ?? '') + '\u0000' + (tags.album ?? folder));
     const source = tags.picture ?? folderCovers.get(folder);
     if (source && !this.covers.has(cover)) this.covers.set(cover, pendingCoverEntry(source));

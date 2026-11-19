@@ -16,6 +16,7 @@ Plain HTML, CSS and JavaScript modules. No frameworks, no build step, no depende
 - Works offline after the first visit (service worker cache)
 - Installable to the home screen
 - English and Russian UI, chosen from the browser language or set manually in Settings
+- Diagnostics log with an optional debug mode (Settings → Diagnostics): view, search, download, share and clear it on the device
 
 Supported formats depend on the browser: typically MP3, M4A/M4B, AAC, FLAC, OGG/OGA, Opus, WAV, WebM.
 
@@ -47,6 +48,12 @@ After changing any cached file, bump the `CACHE` version in [sw.js](sw.js) so cl
 - The library index (track list, tags and cover thumbnails) is cached in IndexedDB, so it shows up instantly on the next launch. Playing still requires choosing the folder again; already known files are matched by path and size and are not re-read, so this takes seconds instead of a full rescan.
 - To skip choosing the folder entirely, turn on Settings → Storage → "Keep music in the browser". The music is copied into the Origin Private File System and plays from there after a restart. This doubles the space the music takes; turning the setting off deletes the copy (the original files are never touched).
 
+## Diagnostics
+
+The app keeps an event log in IndexedDB (database `tiny-player-log`, last 20 000 entries). Playback, Media Session, page lifecycle events and errors are always recorded. Turning on Settings → Diagnostics → "Debug logs" adds very detailed entries: every `<audio>` event with buffer state, queue decisions, taps, swipes, dialog and sheet changes, tag parsing, cover generation, IndexedDB and OPFS operations, console output, network, battery, audio devices, long tasks and a memory heartbeat every 30 seconds.
+
+"View log" opens the log newest first with search. From there it can be downloaded as a `.txt` file, shared via the system share sheet (where the browser supports sharing files) or cleared. The log never leaves the device unless exported.
+
 ## Project structure
 
 ```
@@ -59,7 +66,8 @@ js/library.js           File import, track list, cover art
 js/library-cache.js     IndexedDB cache of the library index and covers
 js/offline-store.js     Optional copy of the music files in browser storage (OPFS)
 js/player.js            Playback, queue, shuffle/repeat, Media Session
-js/diagnostics.js       Playback event log (Settings → Diagnostics)
+js/diagnostics.js       Event log in IndexedDB with debug mode (Settings → Diagnostics)
+js/probes.js            Global error, console and device probes feeding the log
 js/tags.js              Tag parsers: ID3, FLAC, Ogg, MP4
 js/virtual-list.js      Virtualized scrolling list
 js/sortable.js          Drag-to-reorder for the queue

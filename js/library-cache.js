@@ -1,3 +1,5 @@
+import { logDebug } from './diagnostics.js';
+
 const DB_NAME = 'tiny-player';
 const DB_VERSION = 1;
 const META = 'meta';
@@ -42,6 +44,7 @@ async function withDb(action) {
 }
 
 export function loadLibrary() {
+  const started = performance.now();
   return withDb(async db => {
     const tx = db.transaction([META, COVERS], 'readonly');
     const [tracks, keys, blobs] = await Promise.all([
@@ -49,23 +52,34 @@ export function loadLibrary() {
       result(tx.objectStore(COVERS).getAllKeys()),
       result(tx.objectStore(COVERS).getAll()),
     ]);
+    logDebug('cache-load', `tracks=${tracks?.length ?? 0} covers=${keys.length} ms=${Math.round(performance.now() - started)}`);
     if (!tracks?.length) return null;
     return { tracks, covers: new Map(keys.map((key, i) => [key, blobs[i]])) };
   });
 }
 
 export function saveLibrary({ tracks, covers }) {
+  const started = performance.now();
   return withDb(async db => {
     const stored = new Set(await result(db.transaction(COVERS, 'readonly').objectStore(COVERS).getAllKeys()));
     const tx = db.transaction([META, COVERS], 'readwrite');
     const coverStore = tx.objectStore(COVERS);
     tx.objectStore(META).put(tracks, TRACKS_KEY);
+    let removed = 0;
+    let added = 0;
     for (const key of stored) {
-      if (!covers.has(key)) coverStore.delete(key);
+      if (!covers.has(key)) {
+        coverStore.delete(key);
+        removed++;
+      }
     }
     for (const [key, blobs] of covers) {
-      if (!stored.has(key)) coverStore.put(blobs, key);
+      if (!stored.has(key)) {
+        coverStore.put(blobs, key);
+        added++;
+      }
     }
     await completion(tx);
+    logDebug('cache-save', `tracks=${tracks.length} covers=${covers.size} added=${added} removed=${removed} ms=${Math.round(performance.now() - started)}`);
   });
 }

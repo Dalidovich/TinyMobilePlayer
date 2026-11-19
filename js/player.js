@@ -1,9 +1,18 @@
-import { logEvent } from './diagnostics.js';
+import { describeError, logDebug, logEvent } from './diagnostics.js';
 
 const SETTINGS_KEY = 'tiny-player.settings';
 const RESTART_THRESHOLD = 3;
 const MAX_FAILURES = 5;
 const REPEAT_MODES = ['off', 'all', 'one'];
+const LOGGED_EVENTS = ['play', 'playing', 'pause', 'ended', 'waiting', 'stalled', 'abort', 'emptied'];
+const DEBUG_EVENTS = ['loadstart', 'suspend', 'loadedmetadata', 'loadeddata', 'canplay', 'canplaythrough', 'durationchange', 'seeking', 'seeked', 'ratechange', 'volumechange'];
+const THROTTLED_EVENTS = { timeupdate: 5000, progress: 1000 };
+
+function describeRanges(ranges) {
+  const parts = [];
+  for (let i = 0; i < ranges.length; i++) parts.push(`${ranges.start(i).toFixed(1)}-${ranges.end(i).toFixed(1)}`);
+  return parts.join(',') || '-';
+}
 
 function shuffled(list) {
   const out = list.slice();
@@ -58,10 +67,35 @@ export class Player extends EventTarget {
     return `${this.current ?? '-'} t=${currentTime.toFixed(1)} d=${duration.toFixed(1)} rs=${readyState} ns=${networkState}`;
   }
 
+  describeAudio() {
+    const { paused, playbackRate, volume, muted, buffered, seekable } = this.audio;
+    return `${this.describeState()} paused=${paused} rate=${playbackRate} vol=${volume}${muted ? ' muted' : ''} buf=${describeRanges(buffered)} seekable=${describeRanges(seekable)}`;
+  }
+
+  describeQueue() {
+    return `pos=${this.pos}/${this.order.length} upNext=${this.upNext.length} fromQueue=${this.fromQueue} shuffle=${this.shuffle} repeat=${this.repeat}`;
+  }
+
+  trace(action, detail = '') {
+    logDebug(`player.${action}`, () => `${typeof detail === 'function' ? detail() : detail} | ${this.describeQueue()}`.trimStart());
+  }
+
   bindAudio() {
     const audio = this.audio;
-    for (const type of ['play', 'playing', 'pause', 'ended', 'waiting', 'stalled', 'abort', 'emptied']) {
+    for (const type of LOGGED_EVENTS) {
       audio.addEventListener(type, () => logEvent(type, this.describeState()));
+    }
+    for (const type of DEBUG_EVENTS) {
+      audio.addEventListener(type, () => logDebug(type, () => this.describeAudio()));
+    }
+    for (const [type, interval] of Object.entries(THROTTLED_EVENTS)) {
+      let last = 0;
+      audio.addEventListener(type, () => {
+        const now = performance.now();
+        if (now - last < interval) return;
+        last = now;
+        logDebug(type, () => this.describeAudio());
+      });
     }
     audio.addEventListener('ended', () => this.next(true));
     audio.addEventListener('playing', () => {
@@ -70,6 +104,7 @@ export class Player extends EventTarget {
     for (const type of ['play', 'pause']) {
       audio.addEventListener(type, () => {
         if (navigator.mediaSession) navigator.mediaSession.playbackState = audio.paused ? 'paused' : 'playing';
+        logDebug('session.playbackState', audio.paused ? 'paused' : 'playing');
         this.emit('playstate');
       });
     }
@@ -95,11 +130,11 @@ export class Player extends EventTarget {
     for (const [action, handler] of Object.entries(handlers)) {
       try {
         session.setActionHandler(action, details => {
-          logEvent(`session:${action}`, this.describeState());
+          logEvent(`session:${action}`, `${this.describeState()} ${JSON.stringify(details ?? {})}`);
           handler(details);
         });
-      } catch {
-        continue;
+      } catch (error) {
+        logDebug('session.unsupported', `${action}: ${error.message}`);
       }
     }
   }
@@ -108,6 +143,7 @@ export class Player extends EventTarget {
     if (!navigator.mediaSession) return;
     const cover = await this.library.coverUrl(track.cover, 'full');
     if (this.current !== track.id) return;
+    logDebug('session.metadata', `${track.id} cover=${!!cover}`);
     navigator.mediaSession.metadata = new MediaMetadata({
       title: track.title,
       artist: track.artist ?? '',
@@ -121,22 +157,28 @@ export class Player extends EventTarget {
     if (!navigator.mediaSession?.setPositionState || !Number.isFinite(duration)) return;
     try {
       navigator.mediaSession.setPositionState({ duration, playbackRate, position: Math.min(currentTime, duration) });
-    } catch {
-      return;
+      logDebug('session.position', `${currentTime.toFixed(1)}/${duration.toFixed(1)} rate=${playbackRate}`);
+    } catch (error) {
+      logDebug('session.position-failed', error.message);
     }
   }
 
   load(id) {
     const track = this.library.byId.get(id);
-    if (!track) return;
+    if (!track) {
+      logDebug('player.load-unknown', id);
+      return;
+    }
     this.current = id;
     this.emit('track');
     this.emit('queue');
     this.updateMediaSession(track);
     this.retried = null;
     logEvent('load', id);
+    this.trace('load', () => `${track.path} | ${track.artist ?? '-'} / ${track.album ?? '-'} / ${track.title}`);
     const file = this.library.getFile(track);
     if (!file) {
+      logEvent('missingfile', id);
       this.releaseSource();
       this.emit('missingfile');
       return;
@@ -147,6 +189,7 @@ export class Player extends EventTarget {
 
   setSource(file, position = 0) {
     const previous = this.objectUrl;
+    logDebug('player.setSource', `${file.name} size=${file.size} type=${file.type || '-'} modified=${file.lastModified} position=${position.toFixed(1)}`);
     this.objectUrl = URL.createObjectURL(file);
     this.audio.src = this.objectUrl;
     if (position) this.audio.currentTime = position;
@@ -156,6 +199,7 @@ export class Player extends EventTarget {
   stopIfMissing() {
     const track = this.track;
     if (!track || this.library.getFile(track)) return;
+    this.trace('stopIfMissing', track.id);
     this.stop();
     this.emit('track');
     this.emit('queue');
@@ -163,10 +207,14 @@ export class Player extends EventTarget {
 
   resumeAfterLink() {
     const track = this.track;
-    if (track && !this.objectUrl && this.library.getFile(track)) this.load(track.id);
+    if (track && !this.objectUrl && this.library.getFile(track)) {
+      this.trace('resumeAfterLink', track.id);
+      this.load(track.id);
+    }
   }
 
   play() {
+    this.trace('play', () => this.describeAudio());
     if (!this.current && this.upNext.length) {
       this.next();
       return;
@@ -180,7 +228,7 @@ export class Player extends EventTarget {
       this.load(this.current);
       return;
     }
-    this.audio.play().catch(error => {
+    this.audio.play().then(() => logDebug('play-resolved', () => this.describeState())).catch(error => {
       logEvent('play-rejected', `${error.name}: ${error.message} ${this.describeState()}`);
       this.emit('playstate');
     });
@@ -188,6 +236,7 @@ export class Player extends EventTarget {
 
   releaseSource() {
     if (!this.objectUrl) return;
+    logDebug('player.releaseSource', this.current ?? '-');
     URL.revokeObjectURL(this.objectUrl);
     this.objectUrl = null;
     this.audio.removeAttribute('src');
@@ -195,12 +244,14 @@ export class Player extends EventTarget {
   }
 
   toggle() {
+    this.trace('toggle', this.audio.paused ? 'play' : 'pause');
     if (this.audio.paused) this.play();
     else this.audio.pause();
   }
 
   seek(seconds) {
     const duration = this.audio.duration;
+    this.trace('seek', `${Number(seconds).toFixed(1)} of ${duration}`);
     if (!Number.isFinite(duration)) return;
     this.audio.currentTime = Math.max(0, Math.min(seconds, duration));
   }
@@ -214,7 +265,10 @@ export class Player extends EventTarget {
       this.retried = id;
       const position = this.audio.currentTime;
       const file = await this.library.reloadFile(track);
-      if (this.current !== id) return;
+      if (this.current !== id) {
+        logDebug('player.retry-abandoned', `${id} -> ${this.current}`);
+        return;
+      }
       if (file) {
         logEvent('retry', `${id} at ${position.toFixed(1)}`);
         this.setSource(file, position);
@@ -223,6 +277,7 @@ export class Player extends EventTarget {
       }
     }
     this.failures++;
+    logEvent('skip-failed', `${id} failures=${this.failures}`);
     this.emit('error');
     if (this.failures < MAX_FAILURES && this.hasNext()) this.next(true, true);
     else this.audio.pause();
@@ -237,10 +292,12 @@ export class Player extends EventTarget {
     this.order = this.shuffle ? [startId, ...shuffled(ids.filter(id => id !== startId))] : this.base.slice();
     this.pos = this.order.indexOf(startId);
     this.fromQueue = false;
+    this.trace('playList', `ids=${ids.length} start=${startId}`);
     this.load(startId);
   }
 
   next(auto = false, skipRepeatOne = false) {
+    this.trace('next', `auto=${auto} skipRepeatOne=${skipRepeatOne}`);
     if (auto && !skipRepeatOne && this.repeat === 'one' && this.current) {
       this.audio.currentTime = 0;
       this.play();
@@ -259,12 +316,14 @@ export class Player extends EventTarget {
       this.fromQueue = false;
       this.load(this.order[0]);
     } else if (auto) {
+      logEvent('queue-end');
       this.audio.pause();
       this.audio.currentTime = 0;
     }
   }
 
   prev({ restartFirst = true } = {}) {
+    this.trace('prev', () => `restartFirst=${restartFirst} t=${this.audio.currentTime.toFixed(1)}`);
     if (restartFirst && this.audio.currentTime > RESTART_THRESHOLD) {
       this.audio.currentTime = 0;
       return;
@@ -285,11 +344,13 @@ export class Player extends EventTarget {
   }
 
   playNext(id) {
+    this.trace('playNext', id);
     this.upNext.unshift(id);
     this.queueChanged();
   }
 
   addToQueue(id) {
+    this.trace('addToQueue', id);
     this.upNext.push(id);
     this.queueChanged();
   }
@@ -299,17 +360,20 @@ export class Player extends EventTarget {
   }
 
   removeFromUpNext(index) {
+    this.trace('removeFromUpNext', () => `${index} ${this.upNext[index]}`);
     this.upNext.splice(index, 1);
     this.queueChanged();
   }
 
   moveToTop(fromUpNext, index) {
+    this.trace('moveToTop', `upNext=${fromUpNext} index=${index}`);
     const id = fromUpNext ? this.upNext.splice(index, 1)[0] : this.order.splice(this.pos + 1 + index, 1)[0];
     this.upNext.unshift(id);
     this.queueChanged();
   }
 
   removeFromUpcoming(index) {
+    this.trace('removeFromUpcoming', () => `${index} ${this.order[this.pos + 1 + index]}`);
     const [id] = this.order.splice(this.pos + 1 + index, 1);
     const baseIndex = this.base.indexOf(id);
     if (baseIndex >= 0) this.base.splice(baseIndex, 1);
@@ -317,27 +381,32 @@ export class Player extends EventTarget {
   }
 
   moveInUpNext(from, to) {
+    this.trace('moveInUpNext', `${from} -> ${to}`);
     move(this.upNext, from, to);
     this.queueChanged();
   }
 
   moveInUpcoming(from, to) {
+    this.trace('moveInUpcoming', `${from} -> ${to}`);
     move(this.order, this.pos + 1 + from, this.pos + 1 + to);
     this.queueChanged();
   }
 
   clearUpNext() {
+    this.trace('clearUpNext', () => `${this.upNext.length} removed`);
     this.upNext = [];
     this.queueChanged();
   }
 
   jumpToUpNext(index) {
+    this.trace('jumpToUpNext', index);
     const [id] = this.upNext.splice(index, 1);
     this.fromQueue = true;
     this.load(id);
   }
 
   jumpToUpcoming(index) {
+    this.trace('jumpToUpcoming', index);
     this.pos += 1 + index;
     this.fromQueue = false;
     this.load(this.order[this.pos]);
@@ -357,12 +426,14 @@ export class Player extends EventTarget {
         this.pos = anchor ? this.order.indexOf(anchor) : -1;
       }
     }
+    this.trace('toggleShuffle');
     this.queueChanged();
   }
 
   cycleRepeat() {
     this.repeat = REPEAT_MODES[(REPEAT_MODES.indexOf(this.repeat) + 1) % REPEAT_MODES.length];
     this.saveSettings();
+    this.trace('cycleRepeat');
     this.queueChanged();
   }
 
@@ -377,11 +448,13 @@ export class Player extends EventTarget {
     this.base = this.base.filter(exists);
     this.upNext = this.upNext.filter(exists);
     if (this.current && !exists(this.current)) this.stop();
+    this.trace('syncWithLibrary', `tracks=${this.library.tracks.length}`);
     this.emit('queue');
     this.emit('track');
   }
 
   stop() {
+    logEvent('stop', this.describeState());
     this.audio.pause();
     this.releaseSource();
     this.current = null;
@@ -398,8 +471,9 @@ export class Player extends EventTarget {
       const settings = JSON.parse(localStorage.getItem(SETTINGS_KEY)) ?? {};
       this.shuffle = !!settings.shuffle;
       this.repeat = REPEAT_MODES.includes(settings.repeat) ? settings.repeat : 'off';
-    } catch {
-      return;
+      this.trace('restoreSettings');
+    } catch (error) {
+      logDebug('player.restoreSettings-failed', describeError(error));
     }
   }
 }

@@ -2,7 +2,8 @@ import { AUTO, SUPPORTED, initI18n, languageName, languageSetting, setLanguage, 
 import { Library, folderNameOf } from './library.js';
 import { loadLibrary, saveLibrary } from './library-cache.js';
 import { clearStoredFiles, freeSpace, loadStoredFiles, offlineSupported, readStoredFile, removeStoredFiles, storeFiles } from './offline-store.js';
-import { logEvent, logText } from './diagnostics.js';
+import { clearLog, debugEnabled, describeError, formatEntry, logDebug, logError, logEvent, readLog, setDebug } from './diagnostics.js';
+import { environmentLines, installProbes, watchServiceWorker } from './probes.js';
 import { Player } from './player.js';
 import { VirtualList } from './virtual-list.js';
 import { sortable } from './sortable.js';
@@ -15,6 +16,8 @@ const FOLDER_KEY = 'tiny-player.folder';
 const OFFLINE_KEY = 'tiny-player.offline';
 const GIGABYTE = 1024 ** 3;
 const MEGABYTE = 1024 ** 2;
+const LOG_VIEW_LIMIT = 3000;
+const LOG_URL_TTL_MS = 10000;
 
 const $ = id => document.getElementById(id);
 
@@ -29,6 +32,11 @@ let stored = new Map();
 let storingTask = null;
 let stopStoring = false;
 let storeAgain = false;
+let logLines = [];
+
+installProbes({
+  snapshot: () => `${player.describeAudio()} | ${player.describeQueue()} tracks=${library.tracks.length} files=${library.files.size}`,
+});
 
 function pad(n) {
   return String(n).padStart(2, '0');
@@ -102,6 +110,7 @@ function applyFilter() {
     ? library.tracks.filter(track => terms.every(term => track.search.includes(term)))
     : library.tracks;
   trackList.setItems(visible);
+  logDebug('filter', () => `"${terms.join(' ')}" -> ${visible.length} of ${library.tracks.length}`);
   const hasTracks = library.tracks.length > 0;
   $('empty').hidden = hasTracks;
   $('library').hidden = !hasTracks;
@@ -190,6 +199,7 @@ function openSheet(id) {
   if (sheetStack.includes(sheet)) return;
   sheet.classList.add('open');
   sheetStack.push(sheet);
+  logDebug('sheet-open', id);
   history.pushState({ sheet: id }, '');
   if (id === 'queue') {
     renderQueue();
@@ -202,7 +212,9 @@ function closeSheet() {
 }
 
 addEventListener('popstate', () => {
-  sheetStack.pop()?.classList.remove('open');
+  const sheet = sheetStack.pop();
+  sheet?.classList.remove('open');
+  logDebug('sheet-close', sheet?.id ?? '-');
 });
 
 function openActions(track) {
@@ -224,9 +236,10 @@ function renderFolderHint() {
 async function saveCache() {
   try {
     await saveLibrary(await library.snapshot());
-    await navigator.storage?.persist?.();
-  } catch {
-    return;
+    const persisted = await navigator.storage?.persist?.();
+    logDebug('storage-persist', String(persisted));
+  } catch (error) {
+    logError('cache-save-failed', describeError(error));
   }
 }
 
@@ -234,8 +247,8 @@ async function restoreCache() {
   try {
     const cached = await loadLibrary();
     if (cached) library.restore(cached);
-  } catch {
-    return;
+  } catch (error) {
+    logError('cache-load-failed', describeError(error));
   }
 }
 
@@ -259,7 +272,10 @@ function renderOfflineSetting() {
 }
 
 library.fileReloader = async id => {
-  if (!stored.has(id)) return null;
+  if (!stored.has(id)) {
+    logDebug('reload-not-stored', id);
+    return null;
+  }
   const file = await readStoredFile(id);
   stored.set(id, file);
   return file;
@@ -270,7 +286,8 @@ async function restoreStoredFiles() {
   try {
     stored = await loadStoredFiles();
     library.attachFiles(stored);
-  } catch {
+  } catch (error) {
+    logError('opfs-load-failed', describeError(error));
     stored = new Map();
   }
 }
@@ -301,9 +318,11 @@ async function copyToStorage() {
     const pending = library.tracks
       .filter(track => !stored.has(track.id) && library.getFile(track))
       .map(track => [track.id, library.getFile(track)]);
+    logDebug('store-orphans', `${orphans.length}`);
     if (!pending.length) return;
     const bytes = pending.reduce((sum, [, file]) => sum + file.size, 0);
     if (bytes > await freeSpace()) {
+      logEvent('store-no-space', `${bytes} bytes needed`);
       toast(t('offline.noSpace', { size: formatSize(bytes) }));
       return;
     }
@@ -331,13 +350,14 @@ async function copyToStorage() {
     logEvent('store-end', `${stored.size} stored`);
     if (!stopStoring) toast(t('offline.done', { tracks: t('tracks', { count: stored.size }) }));
   } catch (error) {
-    logEvent('store-error', error.message);
+    logError('store-error', describeError(error));
     toast(t('offline.error', { message: error.message }));
   }
 }
 
 async function disableOffline() {
   if (!confirm(t('offline.confirmDisable'))) return;
+  logEvent('offline-disable', `stored=${stored.size}`);
   localStorage.removeItem(OFFLINE_KEY);
   stopStoring = true;
   storeAgain = false;
@@ -350,6 +370,7 @@ async function disableOffline() {
 }
 
 function enableOffline() {
+  logEvent('offline-enable', `tracks=${library.tracks.length} needsFiles=${library.needsFiles}`);
   localStorage.setItem(OFFLINE_KEY, '1');
   if (library.tracks.length && library.needsFiles) {
     toast(t('offline.pickFolder'));
@@ -394,6 +415,96 @@ function renderTexts() {
   renderQueue();
 }
 
+function renderDebugSetting() {
+  $('debug-toggle').setAttribute('aria-checked', String(debugEnabled()));
+}
+
+function toggleDebug() {
+  setDebug(!debugEnabled());
+  renderDebugSetting();
+  if (debugEnabled()) environmentLines().then(lines => logDebug('environment', lines.join(' | ')));
+  toast(t(debugEnabled() ? 'diagnostics.debugOn' : 'diagnostics.debugOff'));
+}
+
+function renderLogView() {
+  const query = $('log-search').value.trim().toLowerCase();
+  const matching = query ? logLines.filter(line => line.toLowerCase().includes(query)) : logLines;
+  $('log-text').textContent = matching.slice(0, LOG_VIEW_LIMIT).join('\n');
+  $('log-count').textContent = matching.length > LOG_VIEW_LIMIT
+    ? t('log.countLimited', { shown: LOG_VIEW_LIMIT, total: matching.length })
+    : t('log.count', { count: matching.length });
+}
+
+async function loadLogView() {
+  const entries = await readLog();
+  logLines = entries.map(formatEntry).reverse();
+  renderLogView();
+  $('log-text').scrollTop = 0;
+}
+
+async function buildLogFile() {
+  const now = new Date();
+  const header = [
+    'Tiny Player log',
+    `exported: ${now.toISOString()}`,
+    ...await environmentLines(),
+    `library: tracks=${library.tracks.length} files=${library.files.size} offline=${offlineEnabled()} stored=${stored.size}`,
+    `player: ${player.describeAudio()} | ${player.describeQueue()}`,
+  ];
+  const entries = await readLog();
+  const text = [...header, '', ...entries.map(formatEntry)].join('\n');
+  const stamp = now.toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  return new File([text], `tiny-player-log-${stamp}.txt`, { type: 'text/plain' });
+}
+
+async function downloadLog() {
+  const file = await buildLogFile();
+  const url = URL.createObjectURL(file);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = file.name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), LOG_URL_TTL_MS);
+  logEvent('log-downloaded', `${file.size} bytes`);
+}
+
+const canShareFiles = () => !!navigator.canShare?.({ files: [new File([''], 'log.txt', { type: 'text/plain' })] });
+
+async function shareLog() {
+  const file = await buildLogFile();
+  try {
+    await navigator.share({ files: [file], title: file.name });
+    logEvent('log-shared', `${file.size} bytes`);
+  } catch (error) {
+    if (error.name === 'AbortError') return;
+    logError('log-share-failed', describeError(error));
+    toast(t('log.shareFailed', { message: error.message }));
+  }
+}
+
+async function clearLogView() {
+  if (!confirm(t('log.confirmClear'))) return;
+  await clearLog();
+  await loadLogView();
+  toast(t('log.cleared'));
+}
+
+function describeClick(target) {
+  const el = target.closest('button, a, input, label, .row, li, [data-action]') ?? target;
+  const parts = [el.tagName.toLowerCase()];
+  if (el.id) parts.push(`#${el.id}`);
+  if (el.dataset?.action) parts.push(`action=${el.dataset.action}`);
+  if (el.dataset?.lang) parts.push(`lang=${el.dataset.lang}`);
+  if (el.classList.length) parts.push(`.${[...el.classList].join('.')}`);
+  const label = el.getAttribute('aria-label') ?? el.textContent.trim().slice(0, 60);
+  if (label) parts.push(`"${label}"`);
+  const track = el.closest('.row')?.item;
+  if (track) parts.push(`track=${track.id}`);
+  const container = el.parentElement?.closest('dialog, .sheet');
+  if (container?.id) parts.push(`in=${container.id}`);
+  return parts.join(' ');
+}
+
 function closeDialogs() {
   for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close();
 }
@@ -401,11 +512,13 @@ function closeDialogs() {
 async function importFiles(input, replace) {
   const files = [...input.files];
   input.value = '';
+  logEvent('import-picked', `files=${files.length} replace=${replace}`);
   if (!files.length) return;
   let wakeLock = null;
   try {
     wakeLock = await navigator.wakeLock?.request('screen');
-  } catch {
+  } catch (error) {
+    logDebug('wakelock-failed', describeError(error));
     wakeLock = null;
   }
   const progress = (done, total) => {
@@ -420,6 +533,7 @@ async function importFiles(input, replace) {
     const folder = replace && count ? folderNameOf(files) : null;
     if (folder) localStorage.setItem(FOLDER_KEY, folder);
   } catch (error) {
+    logError('import-error', describeError(error));
     toast(t('import.error', { message: error.message }));
   } finally {
     $('import-progress').hidden = true;
@@ -446,16 +560,19 @@ const actions = {
     closeDialogs();
     renderLanguageOptions();
     renderOfflineSetting();
+    renderDebugSetting();
     $('settings').showModal();
   },
-  'copy-log': async () => {
-    try {
-      await navigator.clipboard.writeText(logText());
-      toast(t('diagnostics.copied'));
-    } catch (error) {
-      toast(t('diagnostics.copyFailed', { message: error.message }));
-    }
+  'open-log': () => {
+    closeDialogs();
+    $('log-search').value = '';
+    openSheet('log');
+    loadLogView();
   },
+  'refresh-log': loadLogView,
+  'download-log': downloadLog,
+  'share-log': shareLog,
+  'clear-log': clearLogView,
   'close-dialog': button => button.closest('dialog').close(),
   'close-sheet': closeSheet,
   'open-queue': () => openSheet('queue'),
@@ -471,12 +588,16 @@ const actions = {
   },
 };
 
+document.addEventListener('click', event => logDebug('click', () => describeClick(event.target)), true);
+document.addEventListener('contextmenu', event => logDebug('contextmenu', () => describeClick(event.target)), true);
+
 document.addEventListener('click', event => {
   const button = event.target.closest('[data-action]');
   if (button) actions[button.dataset.action]?.(button);
 });
 
 for (const dialog of document.querySelectorAll('dialog')) {
+  dialog.addEventListener('close', () => logDebug('dialog-close', dialog.id));
   dialog.addEventListener('click', event => {
     const rect = dialog.getBoundingClientRect();
     const inside = event.clientX >= rect.left && event.clientX <= rect.right
@@ -538,10 +659,12 @@ $('shuffle').addEventListener('click', () => player.toggleShuffle());
 $('repeat').addEventListener('click', () => player.cycleRepeat());
 
 $('seek').addEventListener('input', () => {
+  if (!seeking) logDebug('seek-drag-start', () => player.describeState());
   seeking = true;
   $('time-current').textContent = formatTime(($('seek').value / 1000) * player.audio.duration);
 });
 $('seek').addEventListener('change', () => {
+  logDebug('seek-drag-end', `value=${$('seek').value}`);
   player.seek(($('seek').value / 1000) * player.audio.duration);
   seeking = false;
 });
@@ -549,12 +672,15 @@ $('seek').addEventListener('change', () => {
 $('language-options').addEventListener('click', async event => {
   const option = event.target.closest('[data-lang]');
   if (!option || option.getAttribute('aria-checked') === 'true') return;
+  logEvent('language', option.dataset.lang);
   await setLanguage(option.dataset.lang);
   renderTexts();
 });
 
 $('queue-clear').addEventListener('click', () => player.clearUpNext());
 $('offline-toggle').addEventListener('click', toggleOffline);
+$('debug-toggle').addEventListener('click', toggleDebug);
+$('log-search').addEventListener('input', renderLogView);
 
 $('queue-body').addEventListener('click', event => {
   const item = event.target.closest('.qlist > li');
@@ -575,8 +701,14 @@ $('queue-body').addEventListener('click', event => {
 });
 
 swipeable($('now-swipe'), {
-  onNext: () => player.next(),
-  onPrev: () => player.prev({ restartFirst: false }),
+  onNext: () => {
+    logDebug('swipe', 'next');
+    player.next();
+  },
+  onPrev: () => {
+    logDebug('swipe', 'prev');
+    player.prev({ restartFirst: false });
+  },
   canNext: () => player.hasNext(),
 });
 
@@ -592,32 +724,33 @@ player.addEventListener('queue', () => {
   renderQueue();
 });
 player.addEventListener('error', () => toast(t('playError')));
+library.addEventListener('change', () => logDebug('library-change', `tracks=${library.tracks.length}`));
 player.addEventListener('missingfile', () => {
   toast(t('relink.toast'));
   $('folder-input').click();
 });
 
-for (const type of ['visibilitychange', 'freeze', 'resume']) {
-  document.addEventListener(type, () => logEvent(type));
-}
-for (const type of ['pagehide', 'pageshow']) {
-  addEventListener(type, event => logEvent(type, event.persisted ? 'persisted' : ''));
-}
-
 async function init() {
-  logEvent('start', `offline=${offlineEnabled()}`);
+  logEvent('start', `offline=${offlineEnabled()} debug=${debugEnabled()}`);
   await initI18n();
   trackList = createTrackList();
   await restoreCache();
   await restoreStoredFiles();
   renderOfflineSetting();
+  renderDebugSetting();
+  $('share-log').hidden = !canShareFiles();
   renderFolderHint();
   player.restoreSettings();
   applyFilter();
   renderTrack();
   renderPlayState();
   renderModes();
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  logDebug('init-done', `tracks=${library.tracks.length} files=${library.files.size} stored=${stored.size}`);
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js')
+      .then(watchServiceWorker)
+      .catch(error => logError('sw-register-failed', describeError(error)));
+  }
 }
 
 init();

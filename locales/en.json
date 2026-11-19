@@ -63,7 +63,23 @@
   "offline.confirmDisable": "Delete the music copy from browser storage? The original files will not be touched.",
   "offline.cleared": "Music copy deleted",
   "diagnostics.title": "Diagnostics",
-  "diagnostics.copy": "Copy playback log",
-  "diagnostics.copied": "Log copied",
-  "diagnostics.copyFailed": "Copy failed: {message}"
+  "diagnostics.debug": "Debug logs",
+  "diagnostics.debugHint": "Records very detailed logs on this device. May slightly slow the app down.",
+  "diagnostics.debugOn": "Debug logs on",
+  "diagnostics.debugOff": "Debug logs off",
+  "diagnostics.view": "View log",
+  "log.title": "Log",
+  "log.refresh": "Refresh",
+  "log.search": "Filter log",
+  "log.count": {
+    "one": "{count} entry",
+    "other": "{count} entries"
+  },
+  "log.countLimited": "Latest {shown} of {total}",
+  "log.download": "Download",
+  "log.share": "Share",
+  "log.clear": "Clear",
+  "log.confirmClear": "Delete the whole log?",
+  "log.cleared": "Log cleared",
+  "log.shareFailed": "Sharing failed: {message}"
 }

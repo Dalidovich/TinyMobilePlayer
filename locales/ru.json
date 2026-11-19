@@ -65,7 +65,25 @@
   "offline.confirmDisable": "Удалить копию музыки из хранилища браузера? Оригинальные файлы не пострадают.",
   "offline.cleared": "Копия музыки удалена",
   "diagnostics.title": "Диагностика",
-  "diagnostics.copy": "Скопировать журнал воспроизведения",
-  "diagnostics.copied": "Журнал скопирован",
-  "diagnostics.copyFailed": "Не удалось скопировать: {message}"
+  "diagnostics.debug": "Отладочные логи",
+  "diagnostics.debugHint": "Записывает очень подробные логи на этом устройстве. Может немного замедлить приложение.",
+  "diagnostics.debugOn": "Отладочные логи включены",
+  "diagnostics.debugOff": "Отладочные логи выключены",
+  "diagnostics.view": "Открыть журнал",
+  "log.title": "Журнал",
+  "log.refresh": "Обновить",
+  "log.search": "Фильтр журнала",
+  "log.count": {
+    "one": "{count} запись",
+    "few": "{count} записи",
+    "many": "{count} записей",
+    "other": "{count} записи"
+  },
+  "log.countLimited": "Последние {shown} из {total}",
+  "log.download": "Скачать",
+  "log.share": "Поделиться",
+  "log.clear": "Очистить",
+  "log.confirmClear": "Удалить весь журнал?",
+  "log.cleared": "Журнал очищен",
+  "log.shareFailed": "Не удалось поделиться: {message}"
 }
