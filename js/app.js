@@ -153,6 +153,14 @@ function cycleSort() {
   toast(t('sort.changed', { mode: t(SORT_LABELS[sortMode]) }));
 }
 
+function renderShuffleButton() {
+  const button = $('shuffle-btn');
+  const label = t(player.shuffle ? 'label.shuffle.on' : 'label.shuffle.off');
+  button.classList.toggle('on', player.shuffle);
+  button.setAttribute('aria-label', label);
+  button.title = label;
+}
+
 function renderTrack() {
   const track = player.track;
   $('mini').hidden = !track;
@@ -189,6 +197,7 @@ function renderTime() {
 
 function renderModes() {
   $('shuffle').classList.toggle('on', player.shuffle);
+  renderShuffleButton();
   $('repeat').classList.toggle('on', player.repeat !== 'off');
   $('repeat').querySelector('use').setAttribute('href', player.repeat === 'one' ? '#i-repeat-one' : '#i-repeat');
 }
@@ -446,6 +455,7 @@ function renderTexts() {
   renderOfflineSetting();
   renderVersion();
   renderSort();
+  renderShuffleButton();
   applyFilter();
   renderTrack();
   renderQueue();
@@ -700,6 +710,7 @@ $('play').addEventListener('click', () => player.toggle());
 $('next').addEventListener('click', () => player.next());
 $('prev').addEventListener('click', () => player.prev());
 $('shuffle').addEventListener('click', () => player.toggleShuffle());
+$('shuffle-btn').addEventListener('click', () => player.toggleShuffle());
 $('repeat').addEventListener('click', () => player.cycleRepeat());
 
 $('seek').addEventListener('input', () => {

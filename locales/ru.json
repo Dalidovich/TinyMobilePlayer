@@ -43,6 +43,8 @@
   "label.next": "Следующий",
   "label.prev": "Предыдущий",
   "label.shuffle": "Перемешать",
+  "label.shuffle.on": "Перемешивание вкл.",
+  "label.shuffle.off": "Перемешивание выкл.",
   "label.repeat": "Повтор",
   "label.queue": "Очередь",
   "label.close": "Закрыть",

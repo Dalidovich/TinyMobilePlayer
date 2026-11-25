@@ -41,6 +41,8 @@
   "label.next": "Next",
   "label.prev": "Previous",
   "label.shuffle": "Shuffle",
+  "label.shuffle.on": "Shuffle on",
+  "label.shuffle.off": "Shuffle off",
   "label.repeat": "Repeat",
   "label.queue": "Queue",
   "label.close": "Close",
